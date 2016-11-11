@@ -16,19 +16,37 @@
  */
 package com.kentender.nifi.nifi_opcua_bundle;
 
-import org.apache.nifi.components.PropertyDescriptor;
-import org.apache.nifi.components.PropertyValue;
-import org.apache.nifi.flowfile.FlowFile;
-import org.apache.nifi.processor.*;
-import org.apache.commons.io.IOUtils;
+import static org.opcfoundation.ua.utils.EndpointUtil.selectByProtocol;
+import static org.opcfoundation.ua.utils.EndpointUtil.selectBySecurityPolicy;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+
 import org.apache.nifi.annotation.behavior.ReadsAttribute;
 import org.apache.nifi.annotation.behavior.ReadsAttributes;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
 import org.apache.nifi.annotation.behavior.WritesAttributes;
-import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.SeeAlso;
 import org.apache.nifi.annotation.documentation.Tags;
+import org.apache.nifi.annotation.lifecycle.OnScheduled;
+import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.flowfile.FlowFile;
+import org.apache.nifi.processor.AbstractProcessor;
+import org.apache.nifi.processor.ProcessContext;
+import org.apache.nifi.processor.ProcessSession;
+import org.apache.nifi.processor.ProcessorInitializationContext;
+import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.io.InputStreamCallback;
 import org.apache.nifi.processor.io.OutputStreamCallback;
@@ -38,7 +56,6 @@ import org.opcfoundation.ua.application.SessionChannel;
 import org.opcfoundation.ua.builtintypes.DataValue;
 import org.opcfoundation.ua.builtintypes.NodeId;
 import org.opcfoundation.ua.common.ServiceResultException;
-
 import org.opcfoundation.ua.core.Attributes;
 import org.opcfoundation.ua.core.EndpointDescription;
 import org.opcfoundation.ua.core.ReadRequest;
@@ -47,23 +64,11 @@ import org.opcfoundation.ua.core.ReadValueId;
 import org.opcfoundation.ua.core.TimestampsToReturn;
 import org.opcfoundation.ua.transport.security.SecurityPolicy;
 
-import static org.opcfoundation.ua.utils.EndpointUtil.selectByProtocol;
-import static org.opcfoundation.ua.utils.EndpointUtil.selectBySecurityPolicy;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
-
 @Tags({"OPC OPCUA UA"})
 @CapabilityDescription("Fetches a response from an OPC UA server based on configured name space and input item names")
 @SeeAlso({})
 @ReadsAttributes({@ReadsAttribute(attribute="", description="")})
 @WritesAttributes({@WritesAttribute(attribute="tagname", description="")})
-@WritesAttributes({@WritesAttribute(attribute="timestamp", description="")})
-@WritesAttributes({@WritesAttribute(attribute="value", description="")})
-@WritesAttributes({@WritesAttribute(attribute="meta", description="")})
 public class OPCUAProcessor extends AbstractProcessor {
 	
 	// Create Client
@@ -83,7 +88,7 @@ public class OPCUAProcessor extends AbstractProcessor {
             .Builder().name("Security Policy")
             .description("How should Nifi authenticate with the UA server")
             .required(true)
-            .allowableValues("None", "that other one")
+            .allowableValues("None", "Basic128Rsa15", "Basic256")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
     
@@ -180,7 +185,8 @@ public class OPCUAProcessor extends AbstractProcessor {
             public void process(InputStream in) throws IOException {
             	
                 try{
-                	String tagname = IOUtils.toString(in);
+                	String tagname = new BufferedReader(new InputStreamReader(in))
+                	  .lines().collect(Collectors.joining("\n"));
 
                     reqTagname.set(tagname);
                     
@@ -217,9 +223,20 @@ public class OPCUAProcessor extends AbstractProcessor {
 		req.setNodesToRead(NodesToRead);
 
 		//create opc session
-		//this needs to be maintained by a service ulitmately with connection reference passed in the processor instance
+		//this needs to be maintained by a service ultimately with connection reference passed in the processor instance
 		try {
+			String url = context.getProperty(ENDPOINT).getValue();
 			endpoints = myClient.discoverEndpoints(url);	
+			
+			switch (context.getProperty(SECURITY_POLICY).getValue()) {
+				
+				case("None"):{
+					
+					
+				}
+				
+			}
+			
 			endpoints = selectByProtocol(endpoints, "opc.tcp");
 			endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
 			mySession = myClient.createSessionChannel(endpoints[0]);
