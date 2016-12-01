@@ -108,7 +108,7 @@ public class FetchOPCUA extends AbstractProcessor {
             .Builder().name("Security Policy")
             .description("How should Nifi authenticate with the UA server")
             .required(true)
-            .allowableValues("None", "Basic128Rsa15")
+            .allowableValues("None", "Basic128Rsa15", "Basic256", "Basic256Rsa256")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
     
@@ -325,41 +325,38 @@ public class FetchOPCUA extends AbstractProcessor {
  			// Retrieve selected discovery URL an end point
 			String url = context.getProperty(ENDPOINT).getValue();
 			
-			// Handle the selection of security policy			
-			switch (context.getProperty(SECURITY_POLICY).getValue()) {
- 				case "None":{
- 					
- 					// Build OPC Client
- 					myClient = Client.createClientApplication( null );
- 					
- 					// Retrieve End point List
- 					endpoints = myClient.discoverEndpoints(url);
- 					
- 					// Filter end points based on selected policy
- 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
- 					
- 					break;
- 					
- 				}
- 				
+			// Handle the selection of security policy
+			
+			if (context.getProperty(SECURITY_POLICY).getValue() == "None"){
+				// Build OPC Client
+				myClient = Client.createClientApplication( null );
+				
+				// Retrieve End point List
+				endpoints = myClient.discoverEndpoints(url);
+				
+				// Filter end points based on selected policy
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
+				
+			} else {
+				
+				KeyPair myClientApplicationInstanceCertificate = null;
+				KeyPair myHttpsCertificate = null;
+				String client_cert = context.getProperty(CLIENT_CERT).getValue();
+				
+				myHttpsCertificate = getHttpsCert("NifiHClient");
+				
+				switch (context.getProperty(SECURITY_POLICY).getValue()) {
+					
  				case "Basic128Rsa15":{
- 					
- 					KeyPair myClientApplicationInstanceCertificate = null;
- 					KeyPair myHttpsCertificate = null;
- 					String client_cert = context.getProperty(CLIENT_CERT).getValue();
  					
  					// Load or create Client's Application Instance Certificate and key
  					if (client_cert != null){
  						logger.debug(client_cert + " is the current cert being used");
  						myClientApplicationInstanceCertificate = getCert(client_cert);
- 	 					myHttpsCertificate = getHttpsCert("NifiHClient");
- 	 					
- 					} else {
+ 	 				} else {
  						logger.debug("Setting security policy to Basic 128");
  						myClientApplicationInstanceCertificate = getCert("NifiClient", SecurityPolicy.BASIC128RSA15);
- 	 					myHttpsCertificate = getHttpsCert("NifiHClient");
- 						
- 					}
+ 	 				}
  					
  					// Build OPC Client
  					myClient = Client.createClientApplication( myClientApplicationInstanceCertificate );
@@ -374,7 +371,57 @@ public class FetchOPCUA extends AbstractProcessor {
  					break;
  					
  				}
-			
+ 				
+ 				case "Basic256": {
+ 					
+ 					// Load or create HTTP and Client's Application Instance Certificate and key
+ 					if (client_cert != null){
+ 						logger.debug(client_cert + " is the current cert being used");
+ 						myClientApplicationInstanceCertificate = getCert(client_cert);
+ 	 				} else {
+ 						logger.debug("Setting security policy to Basic 256");
+ 						myClientApplicationInstanceCertificate = getCert("NifiClient", SecurityPolicy.BASIC256);
+ 	 				}
+ 					
+ 					// Build OPC Client
+ 					myClient = Client.createClientApplication( myClientApplicationInstanceCertificate );
+ 					myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
+ 					
+ 					// Retrieve End point List
+ 					endpoints = myClient.discoverEndpoints(url);
+ 					
+ 					// Filter end points based on selected policy
+ 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256);
+ 					
+ 					break;
+ 					
+ 				}
+ 				
+ 				case "Basic256Rsa256": {
+ 					
+ 					// Load or create HTTP and Client's Application Instance Certificate and key
+ 					if (client_cert != null){
+ 						logger.debug(client_cert + " is the provided certificate is being used");
+ 						myClientApplicationInstanceCertificate = getCert(client_cert);
+ 	 				} else {
+ 						logger.debug("Setting security policy to Basic 256");
+ 						myClientApplicationInstanceCertificate = getCert("NifiClient", SecurityPolicy.BASIC256);
+ 	 				}
+ 					
+ 					// Build OPC Client
+ 					myClient = Client.createClientApplication( myClientApplicationInstanceCertificate );
+ 					myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
+ 					
+ 					// Retrieve End point List
+ 					endpoints = myClient.discoverEndpoints(url);
+ 					
+ 					// Filter end points based on selected policy
+ 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256SHA256);
+ 					
+ 					break;
+ 					
+ 				}}
+				
 			}
 			
 			// Filter based on protocol selection
@@ -388,7 +435,7 @@ public class FetchOPCUA extends AbstractProcessor {
     
     public static KeyPair getCert(String applicationName) {
     	
-    	//create a key pair - I have changed the orginal .pem extention to .key
+    	//create a key pair - I have changed the original .pem extension to .key
   		return getCert(applicationName, SecurityPolicy.NONE);
 			
 	}
@@ -396,7 +443,7 @@ public class FetchOPCUA extends AbstractProcessor {
     
     public static KeyPair getCert(String applicationName, org.opcfoundation.ua.transport.security.SecurityPolicy securityPolicy) {
     	
-    	//create a key pair - I have changed the orginal .pem extention to .key
+    	//create a key pair - I have changed the original .pem extension to .key
   		return getCert(applicationName, applicationName + ".der", applicationName + ".key", securityPolicy);
 			
 	}
@@ -440,9 +487,22 @@ public class FetchOPCUA extends AbstractProcessor {
 				String hostName = InetAddress.getLocalHost().getHostName();
 				String applicationUri = "urn:"+hostName+":"+"NifiClient";
 				
+				/**
+				 * Define the algorithm to use for certificate signatures.
+				 * <p>
+				 * The OPC UA specification defines that the algorithm should be (at least)
+				 * "SHA1WithRSA" for application instance certificates used for security
+				 * policies Basic128Rsa15 and Basic256. For Basic256Sha256 it should be
+				 * "SHA256WithRSA".
+				 * <p>
+				 */
+				
 				if(securityPolicy == SecurityPolicy.BASIC128RSA15){
 					CertificateUtils.setKeySize(1024);
 					CertificateUtils.setCertificateSignatureAlgorithm("SHA1WithRSA");
+				} else if(securityPolicy == SecurityPolicy.BASIC256) {
+					CertificateUtils.setKeySize(2028);
+					CertificateUtils.setCertificateSignatureAlgorithm("Basic256");
 				} else if(securityPolicy == SecurityPolicy.BASIC256SHA256){
 					CertificateUtils.setKeySize(2028);
 					CertificateUtils.setCertificateSignatureAlgorithm("SHA256WithRSA");
