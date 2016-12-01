@@ -16,13 +16,9 @@
  */
 package com.kentender.nifi.opcua;
 
-import static org.opcfoundation.ua.utils.EndpointUtil.selectByMessageSecurityMode;
 import static org.opcfoundation.ua.utils.EndpointUtil.selectByProtocol;
 import static org.opcfoundation.ua.utils.EndpointUtil.selectBySecurityPolicy;
-import static org.opcfoundation.ua.utils.EndpointUtil.sortBySecurityLevel;
-
 import org.apache.nifi.components.PropertyDescriptor;
-import org.apache.nifi.components.PropertyValue;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.processor.*;
@@ -58,8 +54,6 @@ import org.opcfoundation.ua.transport.security.KeyPair;
 import org.opcfoundation.ua.transport.security.PrivKey;
 import org.opcfoundation.ua.transport.security.SecurityPolicy;
 import org.opcfoundation.ua.utils.CertificateUtils;
-import  org.opcfoundation.ua.utils.EndpointUtil;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -122,7 +116,7 @@ public class FetchOPCUA extends AbstractProcessor {
             .Builder().name("Client Certificate")
             .description("Certificate to identify the client when connecting to the UA server")
             .required(false)
-            .addValidator(StandardValidators.FILE_EXISTS_VALIDATOR)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
     
     public static final PropertyDescriptor PROTOCOL = new PropertyDescriptor
@@ -133,20 +127,13 @@ public class FetchOPCUA extends AbstractProcessor {
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
 
-    public static final PropertyDescriptor DEVICE = new PropertyDescriptor
-            .Builder().name("Target device")
-            .description("Which device to read from")
+    public static final PropertyDescriptor PREFIX = new PropertyDescriptor
+            .Builder().name("Target prefix")
+            .description("Identify the device and channel to be used ")
             .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
-    
-    public static final PropertyDescriptor CHANNEL = new PropertyDescriptor
-            .Builder().name("Target channel")
-            .description("Which channel to read from")
-            .required(true)
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .build();
-    
+      
     public static final PropertyDescriptor NAMESPACE = new PropertyDescriptor
             .Builder().name("Namespace")
             .description("Integer value of name space to read from")
@@ -174,8 +161,7 @@ public class FetchOPCUA extends AbstractProcessor {
         descriptors.add(ENDPOINT);
         descriptors.add(SECURITY_POLICY);
         descriptors.add(CLIENT_CERT);
-        descriptors.add(DEVICE);
-        descriptors.add(CHANNEL);
+        descriptors.add(PREFIX);
         descriptors.add(NAMESPACE);
         descriptors.add(PROTOCOL);
         this.descriptors = Collections.unmodifiableList(descriptors);
@@ -199,24 +185,37 @@ public class FetchOPCUA extends AbstractProcessor {
     @OnScheduled
     public void onScheduled(final ProcessContext context) {
     	
-    	//TODO need to move the end point discovery task here
-    }
+    	final ComponentLog logger = getLogger();
+		
+		updateEndpoints(context);
+		
+		// Create Client
+		myClient.getApplication().addLocale( ENGLISH );
+		myClient.getApplication().setApplicationName( new LocalizedText("Java Sample Client", Locale.ENGLISH) );
+		myClient.getApplication().setProductUri( "urn:NifiClient" );
+		myClient.setTimeout( 10000 );
+		
+	}
 
+    /* (non-Javadoc)
+     * @see org.apache.nifi.processor.AbstractProcessor#onTrigger(org.apache.nifi.processor.ProcessContext, org.apache.nifi.processor.ProcessSession)
+     */
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
-    	    		
+    	
     	final ComponentLog logger = getLogger();
+    	
     	//Init response variable
         final AtomicReference<String> reqTagname = new AtomicReference<>();
         final AtomicReference<String> serverResponse = new AtomicReference<>();
         
         
-        //read tag name from flowfile input
         FlowFile flowFile = session.get();
         if ( flowFile == null ) {
             return;
         }
         
+      // Read tag name from flow file content
         session.read(flowFile, new InputStreamCallback() {
             @Override
             public void process(InputStream in) throws IOException {
@@ -236,61 +235,11 @@ public class FetchOPCUA extends AbstractProcessor {
             
         });
         
-        
-        // Discover end points
-        // TODO clarify if it is necessary to discover the endpoints or if we can let the user input them as a property
- 		try {
- 			
- 			//select an endpoint
-			String url = context.getProperty(ENDPOINT).getValue();
-			
-			switch (context.getProperty(SECURITY_POLICY).getValue()) {
- 				case "None":{
- 					myClient = Client.createClientApplication( null );
- 					endpoints = myClient.discoverEndpoints(url);
- 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
- 					
- 					break;
- 					
- 				}
- 				
- 				case "Basic128Rsa15":{
- 					
- 					// Load Client's Application Instance Certificate from file
- 					KeyPair myClientApplicationInstanceCertificate = getCert("Client");
- 					KeyPair myHttpsCertificate = getHttpsCert("Client");
- 					myClient = Client.createClientApplication( myClientApplicationInstanceCertificate );
- 					myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
- 					endpoints = myClient.discoverEndpoints(url);
- 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC128RSA15);
- 					
- 					break;
- 					
- 				}
-			
-			}
-			
-			endpoints = selectByProtocol(endpoints, "opc.tcp");
- 			
- 			// Create Client
-			myClient.getApplication().addLocale( ENGLISH );
-			myClient.getApplication().setApplicationName( new LocalizedText("Java Sample Client", Locale.ENGLISH) );
-			myClient.getApplication().setProductUri( "urn:JavaSampleClient" );
-			
-			
- 		
- 		} catch (ServiceResultException e) {
- 			// TODO Auto-generated catch block
- 			e.printStackTrace();
- 		}
-        
-        //nodes to read string build up 
+        // Build nodes to read string 
         String nodeId = "ns=" 
 				+ context.getProperty(NAMESPACE).getValue()
 				+ ";s="
-				+ context.getProperty(CHANNEL).getValue()
-				+ "."
-				+ context.getProperty(DEVICE).getValue()
+				+ context.getProperty(PREFIX).getValue()
 				+ "."
 				+ reqTagname.get();
         
@@ -298,15 +247,20 @@ public class FetchOPCUA extends AbstractProcessor {
 				new ReadValueId(NodeId.parseNodeId(nodeId), Attributes.Value, null, null ),
 		};
         
-        //form OPC request
+        // Form OPC request
   		ReadRequest req = new ReadRequest();		
   		req.setMaxAge(500.00);
   		req.setTimestampsToReturn(TimestampsToReturn.Both);
   		req.setRequestHeader(null);
   		req.setNodesToRead(NodesToRead);
 
-  		//create and activate session
-  		//this needs to be maintained by a service ultimately with connection reference passed in the processor instance
+  		// Create and activate session
+  		
+  		/*
+  		 * This needs to be maintained by a service 
+  		 * with connection reference passed in the processor instance
+  		 * 
+  		 * */ 
   		
   		try {
   			// TODO pick a method for handling situations where more than one end point remains
@@ -314,23 +268,24 @@ public class FetchOPCUA extends AbstractProcessor {
   			mySession.activate();
   			
   		} catch (ServiceResultException e1) {
-  			// TODO Auto-generated catch block
+  			// TODO Auto-generated catch block THIS NEEDS TO FAIL IN A SPECIAL WAY TO BE RE TRIED 
   			e1.printStackTrace();
   		}
   					
-  		//make OPC request and handle response
+  		// Submit OPC Read and handle response
   		try{
           	res = mySession.Read(req);
               DataValue[] values = res.getResults();
-              serverResponse.set(reqTagname.get() + ";" + values[0].getValue().toString()  + ";"+ values[0].getServerTimestamp().toString() );
+              // TODO need to check the result for errors and other quality issues
+              serverResponse.set(reqTagname.get() + "," + values[0].getValue().toString()  + ","+ values[0].getServerTimestamp().toString() );
               
           }catch (Exception e) {
   			// TODO Auto-generated catch block
   			e.printStackTrace();
   			session.transfer(flowFile, FAILURE);
   		}
-        
-        // To write the results back out to flow file
+  		
+        // Write the results back out to flow file
         flowFile = session.write(flowFile, new OutputStreamCallback() {
 
             @Override
@@ -339,9 +294,16 @@ public class FetchOPCUA extends AbstractProcessor {
             }
             
         });
+        
         session.transfer(flowFile, SUCCESS);
         
-        //close the session
+        // Close the session 
+        
+        /*
+         * ( is this necessary or common practice.  
+         * Timeouts clean up abandoned sessions ??? )*
+         */
+        
         try {
 			mySession.close();
 		} catch (ServiceFaultException e) {
@@ -354,9 +316,96 @@ public class FetchOPCUA extends AbstractProcessor {
         
     }
     
+    public void updateEndpoints(final ProcessContext context){
+    	
+    	final ComponentLog logger = getLogger();
+    	
+ 		try {
+ 			
+ 			// Retrieve selected discovery URL an end point
+			String url = context.getProperty(ENDPOINT).getValue();
+			
+			// Handle the selection of security policy			
+			switch (context.getProperty(SECURITY_POLICY).getValue()) {
+ 				case "None":{
+ 					
+ 					// Build OPC Client
+ 					myClient = Client.createClientApplication( null );
+ 					
+ 					// Retrieve End point List
+ 					endpoints = myClient.discoverEndpoints(url);
+ 					
+ 					// Filter end points based on selected policy
+ 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
+ 					
+ 					break;
+ 					
+ 				}
+ 				
+ 				case "Basic128Rsa15":{
+ 					
+ 					KeyPair myClientApplicationInstanceCertificate = null;
+ 					KeyPair myHttpsCertificate = null;
+ 					String client_cert = context.getProperty(CLIENT_CERT).getValue();
+ 					
+ 					// Load or create Client's Application Instance Certificate and key
+ 					if (client_cert != null){
+ 						logger.debug(client_cert + " is the current cert being used");
+ 						myClientApplicationInstanceCertificate = getCert(client_cert);
+ 	 					myHttpsCertificate = getHttpsCert("NifiHClient");
+ 	 					
+ 					} else {
+ 						logger.debug("Setting security policy to Basic 128");
+ 						myClientApplicationInstanceCertificate = getCert("NifiClient", SecurityPolicy.BASIC128RSA15);
+ 	 					myHttpsCertificate = getHttpsCert("NifiHClient");
+ 						
+ 					}
+ 					
+ 					// Build OPC Client
+ 					myClient = Client.createClientApplication( myClientApplicationInstanceCertificate );
+ 					myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
+ 					
+ 					// Retrieve End point List
+ 					endpoints = myClient.discoverEndpoints(url);
+ 					
+ 					// Filter end points based on selected policy
+ 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC128RSA15);
+ 					
+ 					break;
+ 					
+ 				}
+			
+			}
+			
+			// Filter based on protocol selection
+			endpoints = selectByProtocol(endpoints, "opc.tcp");
+ 			
+ 		} catch (ServiceResultException e) {
+ 			// TODO Auto-generated catch block
+ 			e.printStackTrace();
+ 		}
+    }    
+    
     public static KeyPair getCert(String applicationName) {
-		File certFile = new File(applicationName + ".der");
-		File privKeyFile =  new File(applicationName+ ".pem");
+    	
+    	//create a key pair - I have changed the orginal .pem extention to .key
+  		return getCert(applicationName, SecurityPolicy.NONE);
+			
+	}
+	
+    
+    public static KeyPair getCert(String applicationName, org.opcfoundation.ua.transport.security.SecurityPolicy securityPolicy) {
+    	
+    	//create a key pair - I have changed the orginal .pem extention to .key
+  		return getCert(applicationName, applicationName + ".der", applicationName + ".key", securityPolicy);
+			
+	}
+    
+    public static KeyPair getCert(String applicationName, String cert, String key, org.opcfoundation.ua.transport.security.SecurityPolicy securityPolicy) {
+		
+		File certFile = new File(cert);
+		File privKeyFile =  new File(key);
+		
 		try {
 			Cert myServerCertificate = Cert.load( certFile );
 			PrivKey myServerPrivateKey = PrivKey.load( privKeyFile, PRIVKEY_PASSWORD );
@@ -387,21 +436,33 @@ public class FetchOPCUA extends AbstractProcessor {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (IOException e) {		
-			System.out.println("got an exception opening cert so creating a new cert?");
 			try {
 				String hostName = InetAddress.getLocalHost().getHostName();
-				String applicationUri = "urn:"+hostName+":"+applicationName;
+				String applicationUri = "urn:"+hostName+":"+"NifiClient";
+				
+				if(securityPolicy == SecurityPolicy.BASIC128RSA15){
+					CertificateUtils.setKeySize(1024);
+					CertificateUtils.setCertificateSignatureAlgorithm("SHA1WithRSA");
+				} else if(securityPolicy == SecurityPolicy.BASIC256SHA256){
+					CertificateUtils.setKeySize(2028);
+					CertificateUtils.setCertificateSignatureAlgorithm("SHA256WithRSA");
+				} else {
+					//nothing to do yet
+				}
+				
 				KeyPair keys = CertificateUtils.createApplicationInstanceCertificate(applicationName, null, applicationUri, 3650, hostName);
 				keys.getCertificate().save(certFile);
 				keys.getPrivateKey().save(privKeyFile);
+				
 				return keys;
+				
 			} catch (Exception e1) {
 				System.out.println(e1.toString());
 			}
 		}
 		return null;
-	}
-	
+}
+    
 	public static KeyPair getHttpsCert(String applicationName){
 		File certFile = new File(applicationName + "_https.der");
 		File privKeyFile =  new File(applicationName+ "_https.pem");
@@ -444,8 +505,7 @@ public class FetchOPCUA extends AbstractProcessor {
 			
 			e.printStackTrace();
 		} catch (IOException e) {	
-			System.out.println(e.toString());
-			System.out.println("got an exception so creating a new file?");
+
 			try {
 				KeyPair caCert = getCACert();
 				String hostName = InetAddress.getLocalHost().getHostName();
