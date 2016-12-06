@@ -510,7 +510,7 @@ public class FetchOPCUA extends AbstractProcessor {
 					//nothing to do yet
 				}
 				
-				KeyPair keys = CertificateUtils.createApplicationInstanceCertificate(applicationName, null, applicationUri, 3650, hostName);
+				KeyPair keys = CertificateUtils.createApplicationInstanceCertificate(applicationName, "calpine.com", applicationUri, 3650, hostName);
 				keys.getCertificate().save(certFile);
 				keys.getPrivateKey().save(privKeyFile);
 				
