@@ -14,17 +14,28 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.InvalidParameterSpecException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 
+import org.apache.nifi.annotation.lifecycle.OnScheduled;
+import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.processor.AbstractProcessor;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
+import org.apache.nifi.processor.ProcessorInitializationContext;
+import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
+import org.apache.nifi.processor.util.StandardValidators;
 import org.opcfoundation.ua.application.Client;
 import org.opcfoundation.ua.application.SessionChannel;
 import org.opcfoundation.ua.builtintypes.ExpandedNodeId;
@@ -50,11 +61,73 @@ import org.opcfoundation.ua.utils.CertificateUtils;
 
 public class GetEndpointDescriptions extends AbstractProcessor {
 	
-	final static String PRIVKEY_PASSWORD = "Opc.Ua";
+	
 	final Locale ENGLISH = Locale.ENGLISH;
 	static int max_recursiveDepth = 4;
 	static int recursiveDepth = 0;
 	static StringBuilder stringBuilder = new StringBuilder();
+	
+	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
+            .Builder().name("Endpoint URL")
+            .description("the opc.tcp address of the opc ua server")
+            .required(true)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .build();
+    
+    public static final PropertyDescriptor SECURITY_POLICY = new PropertyDescriptor
+            .Builder().name("Security Policy")
+            .description("How should Nifi authenticate with the UA server")
+            .required(true)
+            .allowableValues("None", "Basic128Rsa15", "Basic256", "Basic256Rsa256")
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .build();
+	
+    public static final Relationship SUCCESS = new Relationship.Builder()
+            .name("Success")
+            .description("Successful OPC read")
+            .build();
+    
+    public static final Relationship FAILURE = new Relationship.Builder()
+            .name("FAILURE")
+            .description("Failed OPC read")
+            .build();
+
+    private List<PropertyDescriptor> descriptors;
+
+    private Set<Relationship> relationships;
+
+    @Override
+    protected void init(final ProcessorInitializationContext context) {
+        final List<PropertyDescriptor> descriptors = new ArrayList<PropertyDescriptor>();
+        descriptors.add(ENDPOINT);
+        descriptors.add(SECURITY_POLICY);
+
+        this.descriptors = Collections.unmodifiableList(descriptors);
+
+        final Set<Relationship> relationships = new HashSet<Relationship>();
+        relationships.add(SUCCESS);
+        relationships.add(FAILURE);
+        this.relationships = Collections.unmodifiableSet(relationships);
+    }
+
+    @Override
+    public Set<Relationship> getRelationships() {
+        return this.relationships;
+    }
+
+    @Override
+    public final List<PropertyDescriptor> getSupportedPropertyDescriptors() {
+        return descriptors;
+    }
+
+    @OnScheduled
+    public void onScheduled(final ProcessContext context) {
+    	
+    	final ComponentLog logger = getLogger();
+		
+
+		
+	}
 	
 	@Override
 	public void onTrigger(ProcessContext arg0, ProcessSession arg1) throws ProcessException {
@@ -64,8 +137,8 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		String url = "opc.tcp://amalthea:21381/MatrikonOpcUaWrapper";
 		
 		// Load Client's Application Instance Certificate from file
-		KeyPair myClientApplicationInstanceCertificate = getCert("Client");
-		KeyPair myHttpsCertificate = getHttpsCert("Client");
+		KeyPair myClientApplicationInstanceCertificate = Utils.getCert("Client");
+		KeyPair myHttpsCertificate = Utils.getHttpsCert("Client");
 		
 		// Create Client
 		Client myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
@@ -127,13 +200,12 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 			for(int i = 0; i < referenceDesc.length; i++){
 				System.out.println(referenceDesc[i].getNodeId());
 				stringBuilder.append(referenceDesc[i].getNodeId() + System.lineSeparator());
-				printTree(mySession, referenceDesc[i].getNodeId());
+				parseNodeTree(mySession, referenceDesc[i].getNodeId());
 			}
 		}
 		
-		File f=new File("c:writeContentfile.txt");
+		File f=new File("writeContentfile.txt");
         
-        StringBuffer sb = new StringBuffer("Text Content to write in java file");
         try{
             FileWriter fwriter = new FileWriter(f);
             BufferedWriter bwriter = new BufferedWriter(fwriter);
@@ -146,7 +218,7 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		
 	}
 	
-private static void printTree(SessionChannel sessionChannel, ExpandedNodeId expandedNodeId){
+private static void parseNodeTree(SessionChannel sessionChannel, ExpandedNodeId expandedNodeId){
 		
 		if(expandedNodeId == null){
 			return;
@@ -221,15 +293,15 @@ private static void printTree(SessionChannel sessionChannel, ExpandedNodeId expa
 				
 				//Print indentation	
 				for(int j = 0; j < recursiveDepth; j++){
-					System.out.print("-");
+					stringBuilder.append("- ");
 				}
+				stringBuilder.append(System.lineSeparator());
 				
 				// Print the current node
-				System.out.println(referenceDesc[k].getNodeId());
 				stringBuilder.append(referenceDesc[k].getNodeId() + System.lineSeparator());
 				
 				// Print the child node
-				printTree(sessionChannel, referenceDesc[k].getNodeId());
+				parseNodeTree(sessionChannel, referenceDesc[k].getNodeId());
 			}
 		
 		}
@@ -242,158 +314,5 @@ private static void printTree(SessionChannel sessionChannel, ExpandedNodeId expa
 	}
 	
 	
-	public static KeyPair getCert(String applicationName) {
-		File certFile = new File(applicationName + ".der");
-		File privKeyFile =  new File(applicationName+ ".pem");
-		try {
-			Cert myServerCertificate = Cert.load( certFile );
-			PrivKey myServerPrivateKey = PrivKey.load( privKeyFile, PRIVKEY_PASSWORD );
-			return new KeyPair(myServerCertificate, myServerPrivateKey); 
-		} catch (CertificateException e) {
-			System.out.println(e.toString());
-		} catch (NoSuchAlgorithmException e) {
-			System.out.println(e.toString());
-		} catch (InvalidKeyException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidKeySpecException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (NoSuchPaddingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidAlgorithmParameterException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IllegalBlockSizeException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (BadPaddingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidParameterSpecException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IOException e) {		
-			//System.out.println("got an exception opening cert so creating a new cert?");
-			try {
-				
-				CertificateUtils.setKeySize(1024);
-				CertificateUtils.setCertificateSignatureAlgorithm("SHA1WithRSA");
-				
-				String hostName = InetAddress.getLocalHost().getHostName();
-				String applicationUri = "urn:"+hostName+":"+applicationName;
-				KeyPair keys = CertificateUtils.createApplicationInstanceCertificate(applicationName, null, applicationUri, 3650, hostName);
-				keys.getCertificate().save(certFile);
-				keys.getPrivateKey().save(privKeyFile);
-				return keys;
-			} catch (Exception e1) {
-				System.out.println(e1.toString());
-			}
-		}
-		return null;
-	}
 	
-	public static KeyPair getHttpsCert(String applicationName){
-		File certFile = new File(applicationName + "_https.der");
-		File privKeyFile =  new File(applicationName+ "_https.pem");
-		try {
-			Cert myServerCertificate = Cert.load( certFile );
-			PrivKey myServerPrivateKey = PrivKey.load( privKeyFile, PRIVKEY_PASSWORD );
-			return new KeyPair(myServerCertificate, myServerPrivateKey); 
-		} catch (CertificateException e) {
-			
-			System.out.println(e.toString());
-		} catch (NoSuchAlgorithmException e) {
-			
-			System.out.println(e.toString());
-		} catch (InvalidKeyException e) {
-			// TODO Auto-generated catch block
-			
-			System.out.println(e.toString());
-		} catch (InvalidKeySpecException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (NoSuchPaddingException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (InvalidAlgorithmParameterException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (IllegalBlockSizeException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (BadPaddingException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (InvalidParameterSpecException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (IOException e) {	
-			System.out.println(e.toString());
-			System.out.println("got an exception so creating a new file?");
-			try {
-				KeyPair caCert = getCACert();
-				String hostName = InetAddress.getLocalHost().getHostName();
-				String applicationUri = "urn:"+hostName+":"+applicationName;
-				KeyPair keys = CertificateUtils.createHttpsCertificate(hostName, applicationUri, 3650, caCert);
-				keys.save(certFile, privKeyFile, PRIVKEY_PASSWORD);
-				return keys;
-			} catch (Exception e1) {
-				System.out.println(e1.toString());
-			}
-		}
-		return null;
-	}
-	
-	public static KeyPair getCACert(){
-		File certFile = new File("SampleCA.der");
-		File privKeyFile =  new File("SampleCA.pem");
-		try {
-			Cert myServerCertificate = Cert.load( certFile );
-			PrivKey myServerPrivateKey = PrivKey.load( privKeyFile, PRIVKEY_PASSWORD );
-			return new KeyPair(myServerCertificate, myServerPrivateKey); 
-		} catch (CertificateException e) {
-			System.out.println(e.toString());
-		} catch (IOException e) {		
-			try {
-				KeyPair keys = CertificateUtils.createIssuerCertificate("SampleCA", 3650, null);
-				keys.getCertificate().save(certFile);
-				keys.getPrivateKey().save(privKeyFile, PRIVKEY_PASSWORD);
-				return keys;
-			} catch (Exception e1) {
-				System.out.println(e1.toString());
-			}
-		} catch (NoSuchAlgorithmException e) {
-			System.out.println(e.toString());
-		} catch (InvalidKeyException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidKeySpecException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (NoSuchPaddingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidAlgorithmParameterException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IllegalBlockSizeException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (BadPaddingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidParameterSpecException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-		return null;
-	}
 }
