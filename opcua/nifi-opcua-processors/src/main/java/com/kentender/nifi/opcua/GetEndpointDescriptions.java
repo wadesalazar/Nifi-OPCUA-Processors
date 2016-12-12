@@ -61,11 +61,12 @@ import org.opcfoundation.ua.utils.CertificateUtils;
 
 public class GetEndpointDescriptions extends AbstractProcessor {
 	
-	
 	final Locale ENGLISH = Locale.ENGLISH;
 	static int max_recursiveDepth = 4;
 	static int recursiveDepth = 0;
 	static StringBuilder stringBuilder = new StringBuilder();
+	static String url = "opc.tcp://amalthea:21381/MatrikonOpcUaWrapper";
+	static String applicationName = "Nifi Client";
 	
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
@@ -81,7 +82,42 @@ public class GetEndpointDescriptions extends AbstractProcessor {
             .allowableValues("None", "Basic128Rsa15", "Basic256", "Basic256Rsa256")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
+    
+    public static final PropertyDescriptor STARTING_NODE = new PropertyDescriptor
+            .Builder().name("Starting Node")
+            .description("From what node should Nifi begin browsing the node tree. Default is the root node.")
+            .required(true)
+            .build();
+    public static final PropertyDescriptor RECURSIVE_DEPTH = new PropertyDescriptor
+            .Builder().name("Recursive Depth")
+            .description("To avoid looping how deep should the processor explore the node tree")
+            .required(true)
+            .addValidator(StandardValidators.INTEGER_VALIDATOR)
+            .build();
+    
+    public static final PropertyDescriptor APPLICATION_NAME = new PropertyDescriptor
+            .Builder().name("Name used to identify your application")
+            .description("The application name is used to label certificates identifying this application")
+            .required(true)
+            .addValidator(StandardValidators.CHARACTER_SET_VALIDATOR)
+            .build();
+    
+    public static final PropertyDescriptor OUTPUT_FILENAME = new PropertyDescriptor
+            .Builder().name("Output filename")
+            .description("File path and name used for output")
+            .required(true)
+            .addValidator(StandardValidators.CHARACTER_SET_VALIDATOR)
+            .build();
 	
+    public static final PropertyDescriptor PRINT_INDENTATION = new PropertyDescriptor
+            .Builder().name("Print Indentation")
+            .description("Should Nifi add indentation to the output text")
+            .required(true)
+            .allowableValues("No", "Yes")
+            .defaultValue("No")
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .build();
+    
     public static final Relationship SUCCESS = new Relationship.Builder()
             .name("Success")
             .description("Successful OPC read")
@@ -100,7 +136,12 @@ public class GetEndpointDescriptions extends AbstractProcessor {
     protected void init(final ProcessorInitializationContext context) {
         final List<PropertyDescriptor> descriptors = new ArrayList<PropertyDescriptor>();
         descriptors.add(ENDPOINT);
+        descriptors.add(RECURSIVE_DEPTH);
         descriptors.add(SECURITY_POLICY);
+        descriptors.add(STARTING_NODE);
+        descriptors.add(APPLICATION_NAME);
+        descriptors.add(OUTPUT_FILENAME);
+        descriptors.add(PRINT_INDENTATION);
 
         this.descriptors = Collections.unmodifiableList(descriptors);
 
@@ -131,21 +172,17 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 	
 	@Override
 	public void onTrigger(ProcessContext arg0, ProcessSession arg1) throws ProcessException {
-		// TODO Auto-generated method stub
-		// Create Client
-		//String url = "opc.tcp://192.168.189.10:49320/";
-		String url = "opc.tcp://amalthea:21381/MatrikonOpcUaWrapper";
 		
 		// Load Client's Application Instance Certificate from file
-		KeyPair myClientApplicationInstanceCertificate = Utils.getCert("Client");
-		KeyPair myHttpsCertificate = Utils.getHttpsCert("Client");
+		KeyPair myClientApplicationInstanceCertificate = Utils.getCert(applicationName);
+		KeyPair myHttpsCertificate = Utils.getHttpsCert(applicationName);
 		
 		// Create Client
 		Client myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
 		myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
 		myClient.getApplication().addLocale( ENGLISH );
-		myClient.getApplication().setApplicationName( new LocalizedText("YOUR APPLICATION NAME", Locale.ENGLISH) );
-		myClient.getApplication().setProductUri( "urn:yourapplicationname" );
+		myClient.getApplication().setApplicationName( new LocalizedText(applicationName, Locale.ENGLISH) );
+		myClient.getApplication().setProductUri( "urn:" + applicationName );
 		
 		//select an endpoint
 		EndpointDescription[] endpoints = null;
@@ -158,8 +195,8 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		endpoints = selectByProtocol(endpoints, "opc.tcp");
 		endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC128RSA15);
 		
-		//System.out.println(SecurityPolicy.NONE);
-		
+
+		// Create a session using end point ( assumed first in the queue, error handling should cycle through others )
 		SessionChannel mySession = null;
 		try {
 			mySession = myClient.createSessionChannel(endpoints[0]);
@@ -192,7 +229,8 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 			e1.printStackTrace();
 		}
 		
-		
+		// Retrieve reference descriptions for the result set
+		// 0 index is assumed 
 		ReferenceDescription[] referenceDesc = browseResults[0].getReferences();
 		
 		if(referenceDesc != null){
