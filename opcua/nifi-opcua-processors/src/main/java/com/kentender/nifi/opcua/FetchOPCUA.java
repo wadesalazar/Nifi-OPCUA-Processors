@@ -291,6 +291,7 @@ public class FetchOPCUA extends AbstractProcessor {
             @Override
             public void process(OutputStream out) throws IOException {
             	out.write(serverResponse.get().getBytes());
+            	
             }
             
         });
@@ -510,7 +511,7 @@ public class FetchOPCUA extends AbstractProcessor {
 					//nothing to do yet
 				}
 				
-				KeyPair keys = CertificateUtils.createApplicationInstanceCertificate(applicationName, "calpine.com", applicationUri, 3650, hostName);
+				KeyPair keys = CertificateUtils.createApplicationInstanceCertificate(applicationName, "your.fqhn.org", applicationUri, 3650, hostName);
 				keys.getCertificate().save(certFile);
 				keys.getPrivateKey().save(privKeyFile);
 				
