@@ -89,6 +89,8 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 	static String outputFilename = null;
 	static String print_indentation = null;
 	static String starting_node = null;
+	static EndpointDescription[] endpoints = null;
+	static Client myClient = null;
 	
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
@@ -188,29 +190,46 @@ public class GetEndpointDescriptions extends AbstractProcessor {
     	
     	final ComponentLog logger = getLogger();
 		
-    	// Set varibles
+    	// Set variables
     	applicationName = context.getProperty(APPLICATION_NAME).getValue();
     	outputFilename = context.getProperty(OUTFILE_NAME).getValue();
 		print_indentation = context.getProperty(PRINT_INDENTATION).getValue();
 		max_recursiveDepth = Integer.valueOf(context.getProperty(RECURSIVE_DEPTH).getValue());
 		url = context.getProperty(ENDPOINT).getValue();
 		
-		// Load Client's certificates from file or create new certs
-    	myClientApplicationInstanceCertificate = Utils.getCert(applicationName);
-		myHttpsCertificate = Utils.getHttpsCert(applicationName);
-	
-    }
-	
-	@Override
-	public void onTrigger(ProcessContext context, ProcessSession session) throws ProcessException {
+		logger.debug(print_indentation);
 		
-		final ComponentLog logger = getLogger();
-		recursiveDepth = 0;
-		starting_node = context.getProperty(STARTING_NODE).getValue();
+		// Load Client's certificates from file or create new certs
+		
+		if (context.getProperty(SECURITY_POLICY).getValue() == "None"){
+			// Build OPC Client
+			myClientApplicationInstanceCertificate = null;
+						
+		} else {
+
+			myHttpsCertificate = Utils.getHttpsCert(applicationName);
+			
+			// Load or create HTTP and Client's Application Instance Certificate and key
+			switch (context.getProperty(SECURITY_POLICY).getValue()) {
+				
+				case "Basic128Rsa15":{
+					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC128RSA15);
+					break;
+					
+				}case "Basic256": {
+					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC256);
+					break;
+					
+				}case "Basic256Rsa256": {
+					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC256SHA256);
+					break;
+				}
+			}
+		}
 		
 		// Create Client
 		// TODO need to move this to service or on schedule method
-		Client myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
+		myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
 		myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
 		myClient.getApplication().addLocale( ENGLISH );
 		myClient.getApplication().setApplicationName( new LocalizedText(applicationName, Locale.ENGLISH) );
@@ -218,7 +237,7 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		
 		// Retrieve and filter end point list
 		// TODO need to move this to service or on schedule method
-		EndpointDescription[] endpoints = null;
+		
 		try {
 			endpoints = myClient.discoverEndpoints(url);
 		} catch (ServiceResultException e1) {
@@ -250,11 +269,18 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		
 		// For now only opc.tcp has been implemented
 		endpoints = selectByProtocol(endpoints, "opc.tcp");
+				
+    }
+	
+	@Override
+	public void onTrigger(ProcessContext context, ProcessSession session) throws ProcessException {
+		
+		final ComponentLog logger = getLogger();
+		recursiveDepth = 0;
 		
 		// Create a session using end point description
-		// TODO need to move this to service or on schedule method
-		// ( assumed first in the queue, error handling should cycle through others )
 		SessionChannel mySession = null;
+		
 		try {
 			mySession = myClient.createSessionChannel(endpoints[0]);
 			mySession.activate();	
@@ -263,24 +289,22 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 			logger.error(e1.getMessage());
 		}
 		
-		// Parse the node tree 
-		
+		// Set the starting node and parse the node tree
 		if ( starting_node == null) {
-			logger.debug("Parse the result list for node " + new ExpandedNodeId(Identifiers.RootFolder));
-			parseNodeTree(mySession, new ExpandedNodeId(Identifiers.RootFolder), logger);
+			logger.debug("Parse the root node " + new ExpandedNodeId(Identifiers.RootFolder));
+			parseNodeTree(mySession, new ExpandedNodeId(Identifiers.RootFolder));
 			
 		} else {
-			logger.debug("Parse the result list for node " + new ExpandedNodeId(NodeId.parseNodeId(context.getProperty(STARTING_NODE).getValue())));
-			parseNodeTree(mySession, new ExpandedNodeId(NodeId.parseNodeId(context.getProperty(STARTING_NODE).getValue())), logger);
+			logger.debug("Parse the result list for node " + new ExpandedNodeId(NodeId.parseNodeId(starting_node)));
+			parseNodeTree(mySession, new ExpandedNodeId(NodeId.parseNodeId(starting_node)));
 		}
 		
-		// Write the results back out to flow file
+		// Write the results back out to a flow file
 		FlowFile flowFile = session.create();
         if ( flowFile == null ) {
         	logger.error("Flowfile is null");
         }
 		
-        // Transfer data to flow file
 		flowFile = session.write(flowFile, new OutputStreamCallback() {
             public void process(OutputStream out) throws IOException {
             	out.write(stringBuilder.toString().getBytes());
@@ -288,46 +312,43 @@ public class GetEndpointDescriptions extends AbstractProcessor {
             }
 		});
         
+		// Transfer data to flow file
         session.transfer(flowFile, SUCCESS);
         
-        // Close the session 
+        // Reset our stringBuilder
+        stringBuilder.setLength(0);
         
+        // Close the session 
+        try {
+			mySession.close();
+		} catch (ServiceFaultException e) {
+			// TODO Auto-generated catch block
+			logger.error(e.getMessage());
+		} catch (ServiceResultException e) {
+			// TODO Auto-generated catch block
+			logger.error(e.getMessage());
+		}
         /*
          * ( is this necessary or common practice.  
          * Timeouts clean up abandoned sessions ??? )*
          */
 	}
 	
-	private static void parseNodeTree(SessionChannel sessionChannel, ExpandedNodeId expandedNodeId, ComponentLog logger){
-		
+	private static void parseNodeTree(SessionChannel sessionChannel, ExpandedNodeId expandedNodeId){
 		
 		// Conditions for exiting this function
 		// If provided node is null ( should not happen )
-		if(expandedNodeId == null){
-			
-			logger.debug("Node Provide is Null");
-			return;
-			
-		}
+		if(expandedNodeId == null){	return; }
 		
 		// If we have already reached the max depth
-		if (recursiveDepth > max_recursiveDepth){
-			
-			return;
-			
-		} else {
-			
-			recursiveDepth++;
-		}
-		
+		if (recursiveDepth > max_recursiveDepth){ return; } else { recursiveDepth++;}
 		
 		// Describe the request for given node
 		BrowseDescription[] NodesToBrowse = new BrowseDescription[1];
-		
-		// Set node to browse to given Node
 		NodesToBrowse[0] = new BrowseDescription();
 		NodesToBrowse[0].setBrowseDirection(BrowseDirection.Forward);
 		
+		// Set node to browse to given Node
 		if(expandedNodeId.getIdType() == IdType.String){
 
 			NodesToBrowse[0].setNodeId( new NodeId(expandedNodeId.getNamespaceIndex(), (String) expandedNodeId.getValue()) );
@@ -340,6 +361,8 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		}else if(expandedNodeId.getIdType() == IdType.Opaque){
 
 			NodesToBrowse[0].setNodeId( new NodeId(expandedNodeId.getNamespaceIndex(), (byte[]) expandedNodeId.getValue()) );
+		} else {
+			// return if no matches, not a valid node?
 		}
 		
 		// Form request
@@ -361,10 +384,6 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		// Get results
 		BrowseResult[] browseResults = browseResponse.getResults();
 		
-		if (browseResults.length > 0 || browseResults == null){ 
-			
-		}
-		
 		// Retrieve reference descriptions for the result set 
 		// 0 index is assumed 
 		ReferenceDescription[] referenceDesc = browseResults[0].getReferences();
@@ -377,24 +396,24 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		
 		// Situation 2: There are results descriptions and each node must be parsed
 		for(int k = 0; k < referenceDesc.length; k++){
+				
+			//Print indentation	
+			switch (print_indentation) {
 			
-			if (recursiveDepth > max_recursiveDepth){
-				// If we have reached the defined max depth then break this loop ( avoids infinite recursion )
-				break;
-			}else {
-				
-				//Print indentation	
-				
-				for(int j = 0; j < recursiveDepth; j++){
-					stringBuilder.append("- ");
+				case "Yes":{
+					for(int j = 0; j < recursiveDepth; j++){
+						stringBuilder.append("- ");
+					}
 				}
-				
-				// Print the current node
-				stringBuilder.append(referenceDesc[k].getNodeId() + System.lineSeparator());
-				
-				// Print the child node
-				parseNodeTree(sessionChannel, referenceDesc[k].getNodeId(), logger);
 			}
+			
+			
+			
+			// Print the current node
+			stringBuilder.append(referenceDesc[k].getNodeId() + System.lineSeparator());
+			
+			// Print the child node(s)
+			parseNodeTree(sessionChannel, referenceDesc[k].getNodeId());
 		
 		}
 		
@@ -403,7 +422,5 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		return;
 		
 	}
-	
-	
-	
+
 }
