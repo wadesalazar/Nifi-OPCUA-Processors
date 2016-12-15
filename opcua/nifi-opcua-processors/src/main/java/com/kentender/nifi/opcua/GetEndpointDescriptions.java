@@ -7,6 +7,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
@@ -26,8 +27,17 @@ import javax.crypto.BadPaddingException;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 
+import org.apache.nifi.annotation.behavior.InputRequirement;
+import org.apache.nifi.annotation.behavior.ReadsAttribute;
+import org.apache.nifi.annotation.behavior.ReadsAttributes;
+import org.apache.nifi.annotation.behavior.WritesAttribute;
+import org.apache.nifi.annotation.behavior.WritesAttributes;
+import org.apache.nifi.annotation.documentation.CapabilityDescription;
+import org.apache.nifi.annotation.documentation.SeeAlso;
+import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.logging.ComponentLog;
 import org.apache.nifi.processor.AbstractProcessor;
 import org.apache.nifi.processor.ProcessContext;
@@ -35,6 +45,7 @@ import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.ProcessorInitializationContext;
 import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
+import org.apache.nifi.processor.io.OutputStreamCallback;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.opcfoundation.ua.application.Client;
 import org.opcfoundation.ua.application.SessionChannel;
@@ -59,14 +70,25 @@ import org.opcfoundation.ua.transport.security.PrivKey;
 import org.opcfoundation.ua.transport.security.SecurityPolicy;
 import org.opcfoundation.ua.utils.CertificateUtils;
 
+@Tags({"OPC", "OPCUA", "UA"})
+@CapabilityDescription("Retrieves the namespace from an OPC UA server")
+@SeeAlso({})
+@ReadsAttributes({@ReadsAttribute(attribute="", description="")})
+@WritesAttributes({@WritesAttribute(attribute="", description="")})
+
 public class GetEndpointDescriptions extends AbstractProcessor {
 	
 	final Locale ENGLISH = Locale.ENGLISH;
-	static int max_recursiveDepth = 4;
+	static int max_recursiveDepth = 0;
 	static int recursiveDepth = 0;
 	static StringBuilder stringBuilder = new StringBuilder();
-	static String url = "opc.tcp://amalthea:21381/MatrikonOpcUaWrapper";
-	static String applicationName = "Nifi Client";
+	static String url = "";
+	static String applicationName = "Apache Nifi";
+	static KeyPair myClientApplicationInstanceCertificate = null;
+	static KeyPair myHttpsCertificate = null;
+	static String outputFilename = null;
+	static String print_indentation = null;
+	static String starting_node = null;
 	
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
@@ -86,27 +108,27 @@ public class GetEndpointDescriptions extends AbstractProcessor {
     public static final PropertyDescriptor STARTING_NODE = new PropertyDescriptor
             .Builder().name("Starting Node")
             .description("From what node should Nifi begin browsing the node tree. Default is the root node.")
-            .required(true)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
+    
     public static final PropertyDescriptor RECURSIVE_DEPTH = new PropertyDescriptor
             .Builder().name("Recursive Depth")
-            .description("To avoid looping how deep should the processor explore the node tree")
+            .description("Maxium depth from the starting node to read, Default is 1")
             .required(true)
             .addValidator(StandardValidators.INTEGER_VALIDATOR)
             .build();
     
     public static final PropertyDescriptor APPLICATION_NAME = new PropertyDescriptor
-            .Builder().name("Name used to identify your application")
+            .Builder().name("Application Name")
             .description("The application name is used to label certificates identifying this application")
             .required(true)
-            .addValidator(StandardValidators.CHARACTER_SET_VALIDATOR)
+            .addValidator(StandardValidators.NON_BLANK_VALIDATOR)
             .build();
     
-    public static final PropertyDescriptor OUTPUT_FILENAME = new PropertyDescriptor
+    public static final PropertyDescriptor OUTFILE_NAME = new PropertyDescriptor
             .Builder().name("Output filename")
             .description("File path and name used for output")
-            .required(true)
-            .addValidator(StandardValidators.CHARACTER_SET_VALIDATOR)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
 	
     public static final PropertyDescriptor PRINT_INDENTATION = new PropertyDescriptor
@@ -140,7 +162,7 @@ public class GetEndpointDescriptions extends AbstractProcessor {
         descriptors.add(SECURITY_POLICY);
         descriptors.add(STARTING_NODE);
         descriptors.add(APPLICATION_NAME);
-        descriptors.add(OUTPUT_FILENAME);
+        descriptors.add(OUTFILE_NAME);
         descriptors.add(PRINT_INDENTATION);
 
         this.descriptors = Collections.unmodifiableList(descriptors);
@@ -166,104 +188,139 @@ public class GetEndpointDescriptions extends AbstractProcessor {
     	
     	final ComponentLog logger = getLogger();
 		
-
+    	// Set varibles
+    	applicationName = context.getProperty(APPLICATION_NAME).getValue();
+    	outputFilename = context.getProperty(OUTFILE_NAME).getValue();
+		print_indentation = context.getProperty(PRINT_INDENTATION).getValue();
+		max_recursiveDepth = Integer.valueOf(context.getProperty(RECURSIVE_DEPTH).getValue());
+		url = context.getProperty(ENDPOINT).getValue();
 		
-	}
+		// Load Client's certificates from file or create new certs
+    	myClientApplicationInstanceCertificate = Utils.getCert(applicationName);
+		myHttpsCertificate = Utils.getHttpsCert(applicationName);
+	
+    }
 	
 	@Override
-	public void onTrigger(ProcessContext arg0, ProcessSession arg1) throws ProcessException {
+	public void onTrigger(ProcessContext context, ProcessSession session) throws ProcessException {
 		
-		// Load Client's Application Instance Certificate from file
-		KeyPair myClientApplicationInstanceCertificate = Utils.getCert(applicationName);
-		KeyPair myHttpsCertificate = Utils.getHttpsCert(applicationName);
+		final ComponentLog logger = getLogger();
+		recursiveDepth = 0;
+		starting_node = context.getProperty(STARTING_NODE).getValue();
 		
 		// Create Client
+		// TODO need to move this to service or on schedule method
 		Client myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
 		myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
 		myClient.getApplication().addLocale( ENGLISH );
 		myClient.getApplication().setApplicationName( new LocalizedText(applicationName, Locale.ENGLISH) );
 		myClient.getApplication().setProductUri( "urn:" + applicationName );
 		
-		//select an endpoint
+		// Retrieve and filter end point list
+		// TODO need to move this to service or on schedule method
 		EndpointDescription[] endpoints = null;
 		try {
 			endpoints = myClient.discoverEndpoints(url);
 		} catch (ServiceResultException e1) {
 			// TODO Auto-generated catch block
-			e1.printStackTrace();
+			
+			logger.error(e1.getMessage());
 		}
-		endpoints = selectByProtocol(endpoints, "opc.tcp");
-		endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC128RSA15);
 		
-
-		// Create a session using end point ( assumed first in the queue, error handling should cycle through others )
+		switch (context.getProperty(SECURITY_POLICY).getValue()) {
+			
+			case "Basic128Rsa15":{
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC128RSA15);
+				break;
+			}
+			case "Basic256": {
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256);
+				break;
+			}	
+			case "Basic256Rsa256": {
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256SHA256);
+				break;
+			}
+			default :{
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
+				logger.error("No security mode specified");
+				break;
+			}
+		}
+		
+		// For now only opc.tcp has been implemented
+		endpoints = selectByProtocol(endpoints, "opc.tcp");
+		
+		// Create a session using end point description
+		// TODO need to move this to service or on schedule method
+		// ( assumed first in the queue, error handling should cycle through others )
 		SessionChannel mySession = null;
 		try {
 			mySession = myClient.createSessionChannel(endpoints[0]);
 			mySession.activate();	
 		} catch (ServiceResultException e1) {
 			// TODO Auto-generated catch block
-			e1.printStackTrace();
+			logger.error(e1.getMessage());
 		}
+		
+		logger.debug("Parse the result list for node " + ExpandedNodeId.parseExpandedNodeId(context.getProperty(STARTING_NODE).getValue()).toString());
+		
+		if ( starting_node == null) {
+			parseNodeTree(mySession, ExpandedNodeId.parseExpandedNodeId(Identifiers.RootFolder.toString()), logger);
+		} else {
+			parseNodeTree(mySession, ExpandedNodeId.parseExpandedNodeId(context.getProperty(STARTING_NODE).getValue()), logger);
+		}
+		
 			
-		// Set up browse request
-		BrowseRequest browseRequest = new BrowseRequest();
-		BrowseResponse browseResponse = new BrowseResponse();
-		BrowseResult[] browseResults = null;
 		
-		// Describe the request for parent node
-		BrowseDescription[] NodesToBrowse = new BrowseDescription[1];
-		NodesToBrowse[0] = new BrowseDescription();
-		NodesToBrowse[0].setBrowseDirection(BrowseDirection.Forward);
-		NodesToBrowse[0].setNodeId(Identifiers.RootFolder);
-		browseRequest.setNodesToBrowse(NodesToBrowse);
-		
-		try {
-			browseResponse = mySession.Browse(browseRequest);
-			browseResults = browseResponse.getResults();
-		} catch (ServiceFaultException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		} catch (ServiceResultException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		}
-		
-		// Retrieve reference descriptions for the result set
-		// 0 index is assumed 
-		ReferenceDescription[] referenceDesc = browseResults[0].getReferences();
-		
-		if(referenceDesc != null){
-			
-			for(int i = 0; i < referenceDesc.length; i++){
-				System.out.println(referenceDesc[i].getNodeId());
-				stringBuilder.append(referenceDesc[i].getNodeId() + System.lineSeparator());
-				parseNodeTree(mySession, referenceDesc[i].getNodeId());
-			}
-		}
-		
-		File f=new File("writeContentfile.txt");
-        
-        try{
-            FileWriter fwriter = new FileWriter(f);
-            BufferedWriter bwriter = new BufferedWriter(fwriter);
-            bwriter.write(stringBuilder.toString());
-            bwriter.close();
-         }
-        catch (Exception e){
-              e.printStackTrace();
+		// Write the results back out to flow file
+		FlowFile flowFile = session.create();
+        if ( flowFile == null ) {
+        	logger.error("Flowfile is null");
         }
 		
+		flowFile = session.write(flowFile, new OutputStreamCallback() {
+
+            @Override
+            public void process(OutputStream out) throws IOException {
+            	out.write(stringBuilder.toString().getBytes());
+            	
+            }
+		});
+        
+        session.transfer(flowFile, SUCCESS);
+        
+        // Close the session 
+        
+        /*
+         * ( is this necessary or common practice.  
+         * Timeouts clean up abandoned sessions ??? )*
+         */
 	}
 	
-private static void parseNodeTree(SessionChannel sessionChannel, ExpandedNodeId expandedNodeId){
+	private static void parseNodeTree(SessionChannel sessionChannel, ExpandedNodeId expandedNodeId, ComponentLog logger){
 		
+		
+		// Conditions for exiting this function
+		// If provided node is null ( should not happen )
 		if(expandedNodeId == null){
+			
+			logger.debug("Node Provide is Null");
 			return;
 			
 		}
 		
-		recursiveDepth++;
+		// If we have already reached the max depth
+		if (recursiveDepth > max_recursiveDepth){
+			
+			recursiveDepth = 0;
+			return;
+			
+		} else {
+			
+			recursiveDepth++;
+		}
+		
 		
 		// Describe the request for given node
 		BrowseDescription[] NodesToBrowse = new BrowseDescription[1];
@@ -290,7 +347,6 @@ private static void parseNodeTree(SessionChannel sessionChannel, ExpandedNodeId 
 		BrowseRequest browseRequest = new BrowseRequest();
 		browseRequest.setNodesToBrowse(NodesToBrowse);
 		
-			
 		// Form response, make request 
 		BrowseResponse browseResponse = new BrowseResponse();
 		try {
@@ -324,26 +380,25 @@ private static void parseNodeTree(SessionChannel sessionChannel, ExpandedNodeId 
 		for(int k = 0; k < referenceDesc.length; k++){
 			
 			if (recursiveDepth > max_recursiveDepth){
-				
 				// If we have reached the defined max depth then break this loop ( avoids infinite recursion )
+				recursiveDepth = 0;
 				break;
 			}else {
 				
 				//Print indentation	
+				
 				for(int j = 0; j < recursiveDepth; j++){
 					stringBuilder.append("- ");
 				}
-				stringBuilder.append(System.lineSeparator());
 				
 				// Print the current node
 				stringBuilder.append(referenceDesc[k].getNodeId() + System.lineSeparator());
 				
 				// Print the child node
-				parseNodeTree(sessionChannel, referenceDesc[k].getNodeId());
+				parseNodeTree(sessionChannel, referenceDesc[k].getNodeId(), logger);
 			}
 		
 		}
-		
 		
 		// we have exhausted the child nodes of the given node
 		recursiveDepth--;

@@ -13,3 +13,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 com.kentender.nifi.opcua.FetchOPCUA
+com.kentender.nifi.opcua.GetEndpointDescriptions
