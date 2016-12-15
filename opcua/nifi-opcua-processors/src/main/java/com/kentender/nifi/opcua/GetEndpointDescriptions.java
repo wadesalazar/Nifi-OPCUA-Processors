@@ -78,6 +78,8 @@ import org.opcfoundation.ua.utils.CertificateUtils;
 
 public class GetEndpointDescriptions extends AbstractProcessor {
 	
+	
+	// TODO clean up static vars and implement private where needed
 	final Locale ENGLISH = Locale.ENGLISH;
 	static int max_recursiveDepth = 0;
 	static int recursiveDepth = 0;

@@ -111,7 +111,7 @@ public class FetchOPCUA extends AbstractProcessor {
             .allowableValues("None", "Basic128Rsa15", "Basic256", "Basic256Rsa256")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
-    
+    // TODO change this to application and implement in the same manner as getendpoint
     public static final PropertyDescriptor CLIENT_CERT = new PropertyDescriptor
             .Builder().name("Client Certificate")
             .description("Certificate to identify the client when connecting to the UA server")
@@ -123,10 +123,11 @@ public class FetchOPCUA extends AbstractProcessor {
             .Builder().name("Transfer Protocol")
             .description("How should Nifi communicate with the OPC server")
             .required(true)
-            .allowableValues("opc.tcp", "http")
+            .allowableValues("opc.tcp")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
 
+    // TODO make this optional, either a prefix can be used or the whole node id will need to be suppplied as input
     public static final PropertyDescriptor PREFIX = new PropertyDescriptor
             .Builder().name("Target prefix")
             .description("Identify the device and channel to be used ")
@@ -134,6 +135,7 @@ public class FetchOPCUA extends AbstractProcessor {
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
       
+    // TODO We can use this to create an expanded node id from the node id provided
     public static final PropertyDescriptor NAMESPACE = new PropertyDescriptor
             .Builder().name("Namespace")
             .description("Integer value of name space to read from")
@@ -215,7 +217,7 @@ public class FetchOPCUA extends AbstractProcessor {
             return;
         }
         
-      // Read tag name from flow file content
+        // Read tag name from flow file content
         session.read(flowFile, new InputStreamCallback() {
             @Override
             public void process(InputStream in) throws IOException {
@@ -236,6 +238,7 @@ public class FetchOPCUA extends AbstractProcessor {
         });
         
         // Build nodes to read string 
+        // TODO move this to a expanded node id created from the input string
         String nodeId = "ns=" 
 				+ context.getProperty(NAMESPACE).getValue()
 				+ ";s="
@@ -317,6 +320,8 @@ public class FetchOPCUA extends AbstractProcessor {
         
     }
     
+    
+    // TODO this is the basis of the controller service that needs to be implemented
     public void updateEndpoints(final ProcessContext context){
     	
     	final ComponentLog logger = getLogger();
@@ -344,7 +349,7 @@ public class FetchOPCUA extends AbstractProcessor {
 				KeyPair myHttpsCertificate = null;
 				String client_cert = context.getProperty(CLIENT_CERT).getValue();
 				
-				myHttpsCertificate = getHttpsCert("NifiHClient");
+				myHttpsCertificate = Utils.getHttpsCert("NifiHClient");
 				
 				switch (context.getProperty(SECURITY_POLICY).getValue()) {
 					
@@ -353,10 +358,10 @@ public class FetchOPCUA extends AbstractProcessor {
  					// Load or create Client's Application Instance Certificate and key
  					if (client_cert != null){
  						logger.debug(client_cert + " is the current cert being used");
- 						myClientApplicationInstanceCertificate = getCert(client_cert);
+ 						myClientApplicationInstanceCertificate = Utils.getCert(client_cert);
  	 				} else {
  						logger.debug("Setting security policy to Basic 128");
- 						myClientApplicationInstanceCertificate = getCert("NifiClient", SecurityPolicy.BASIC128RSA15);
+ 						myClientApplicationInstanceCertificate = Utils.getCert("NifiClient", SecurityPolicy.BASIC128RSA15);
  	 				}
  					
  					// Build OPC Client
@@ -378,10 +383,10 @@ public class FetchOPCUA extends AbstractProcessor {
  					// Load or create HTTP and Client's Application Instance Certificate and key
  					if (client_cert != null){
  						logger.debug(client_cert + " is the current cert being used");
- 						myClientApplicationInstanceCertificate = getCert(client_cert);
+ 						myClientApplicationInstanceCertificate =Utils. getCert(client_cert);
  	 				} else {
  						logger.debug("Setting security policy to Basic 256");
- 						myClientApplicationInstanceCertificate = getCert("NifiClient", SecurityPolicy.BASIC256);
+ 						myClientApplicationInstanceCertificate = Utils.getCert("NifiClient", SecurityPolicy.BASIC256);
  	 				}
  					
  					// Build OPC Client
@@ -403,10 +408,10 @@ public class FetchOPCUA extends AbstractProcessor {
  					// Load or create HTTP and Client's Application Instance Certificate and key
  					if (client_cert != null){
  						logger.debug(client_cert + " is the provided certificate is being used");
- 						myClientApplicationInstanceCertificate = getCert(client_cert);
+ 						myClientApplicationInstanceCertificate = Utils.getCert(client_cert);
  	 				} else {
  						logger.debug("Setting security policy to Basic 256");
- 						myClientApplicationInstanceCertificate = getCert("NifiClient", SecurityPolicy.BASIC256);
+ 						myClientApplicationInstanceCertificate = Utils.getCert("NifiClient", SecurityPolicy.BASIC256);
  	 				}
  					
  					// Build OPC Client
@@ -434,195 +439,4 @@ public class FetchOPCUA extends AbstractProcessor {
  		}
     }    
     
-    public static KeyPair getCert(String applicationName) {
-    	
-    	//create a key pair - I have changed the original .pem extension to .key
-  		return getCert(applicationName, SecurityPolicy.NONE);
-			
-	}
-	
-    
-    public static KeyPair getCert(String applicationName, org.opcfoundation.ua.transport.security.SecurityPolicy securityPolicy) {
-    	
-    	//create a key pair - I have changed the original .pem extension to .key
-  		return getCert(applicationName, applicationName + ".der", applicationName + ".key", securityPolicy);
-			
-	}
-    
-    public static KeyPair getCert(String applicationName, String cert, String key, org.opcfoundation.ua.transport.security.SecurityPolicy securityPolicy) {
-		
-		File certFile = new File(cert);
-		File privKeyFile =  new File(key);
-		
-		try {
-			Cert myServerCertificate = Cert.load( certFile );
-			PrivKey myServerPrivateKey = PrivKey.load( privKeyFile, PRIVKEY_PASSWORD );
-			return new KeyPair(myServerCertificate, myServerPrivateKey); 
-		} catch (CertificateException e) {
-			System.out.println(e.toString());
-		} catch (NoSuchAlgorithmException e) {
-			System.out.println(e.toString());
-		} catch (InvalidKeyException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidKeySpecException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (NoSuchPaddingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidAlgorithmParameterException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IllegalBlockSizeException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (BadPaddingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidParameterSpecException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IOException e) {		
-			try {
-				String hostName = InetAddress.getLocalHost().getHostName();
-				String applicationUri = "urn:"+hostName+":"+"NifiClient";
-				
-				/**
-				 * Define the algorithm to use for certificate signatures.
-				 * <p>
-				 * The OPC UA specification defines that the algorithm should be (at least)
-				 * "SHA1WithRSA" for application instance certificates used for security
-				 * policies Basic128Rsa15 and Basic256. For Basic256Sha256 it should be
-				 * "SHA256WithRSA".
-				 * <p>
-				 */
-				
-				if(securityPolicy == SecurityPolicy.BASIC128RSA15){
-					CertificateUtils.setKeySize(1024);
-					CertificateUtils.setCertificateSignatureAlgorithm("SHA1WithRSA");
-				} else if(securityPolicy == SecurityPolicy.BASIC256) {
-					CertificateUtils.setKeySize(2028);
-					CertificateUtils.setCertificateSignatureAlgorithm("Basic256");
-				} else if(securityPolicy == SecurityPolicy.BASIC256SHA256){
-					CertificateUtils.setKeySize(2028);
-					CertificateUtils.setCertificateSignatureAlgorithm("SHA256WithRSA");
-				} else {
-					//nothing to do yet
-				}
-				
-				KeyPair keys = CertificateUtils.createApplicationInstanceCertificate(applicationName, "your.fqhn.org", applicationUri, 3650, hostName);
-				keys.getCertificate().save(certFile);
-				keys.getPrivateKey().save(privKeyFile);
-				
-				return keys;
-				
-			} catch (Exception e1) {
-				System.out.println(e1.toString());
-			}
-		}
-		return null;
-}
-    
-	public static KeyPair getHttpsCert(String applicationName){
-		File certFile = new File(applicationName + "_https.der");
-		File privKeyFile =  new File(applicationName+ "_https.pem");
-		try {
-			Cert myServerCertificate = Cert.load( certFile );
-			PrivKey myServerPrivateKey = PrivKey.load( privKeyFile, PRIVKEY_PASSWORD );
-			return new KeyPair(myServerCertificate, myServerPrivateKey); 
-		} catch (CertificateException e) {
-			
-			System.out.println(e.toString());
-		} catch (NoSuchAlgorithmException e) {
-			
-			System.out.println(e.toString());
-		} catch (InvalidKeyException e) {
-			// TODO Auto-generated catch block
-			
-			System.out.println(e.toString());
-		} catch (InvalidKeySpecException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (NoSuchPaddingException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (InvalidAlgorithmParameterException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (IllegalBlockSizeException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (BadPaddingException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (InvalidParameterSpecException e) {
-			// TODO Auto-generated catch block
-			
-			e.printStackTrace();
-		} catch (IOException e) {	
-
-			try {
-				KeyPair caCert = getCACert();
-				String hostName = InetAddress.getLocalHost().getHostName();
-				String applicationUri = "urn:"+hostName+":"+applicationName;
-				KeyPair keys = CertificateUtils.createHttpsCertificate(hostName, applicationUri, 3650, caCert);
-				keys.save(certFile, privKeyFile, PRIVKEY_PASSWORD);
-				return keys;
-			} catch (Exception e1) {
-				System.out.println(e1.toString());
-			}
-		}
-		return null;
-	}
-	
-	public static KeyPair getCACert(){
-		File certFile = new File("NifiCA.der");
-		File privKeyFile =  new File("NifiCA.pem");
-		try {
-			Cert myServerCertificate = Cert.load( certFile );
-			PrivKey myServerPrivateKey = PrivKey.load( privKeyFile, PRIVKEY_PASSWORD );
-			return new KeyPair(myServerCertificate, myServerPrivateKey); 
-		} catch (CertificateException e) {
-			System.out.println(e.toString());
-		} catch (IOException e) {		
-			try {
-				KeyPair keys = CertificateUtils.createIssuerCertificate("NifiCA", 3650, null);
-				keys.getCertificate().save(certFile);
-				keys.getPrivateKey().save(privKeyFile, PRIVKEY_PASSWORD);
-				return keys;
-			} catch (Exception e1) {
-				System.out.println(e1.toString());
-			}
-		} catch (NoSuchAlgorithmException e) {
-			System.out.println(e.toString());
-		} catch (InvalidKeyException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidKeySpecException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (NoSuchPaddingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidAlgorithmParameterException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IllegalBlockSizeException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (BadPaddingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InvalidParameterSpecException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-		return null;
-	}
 }
