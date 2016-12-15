@@ -263,15 +263,16 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 			logger.error(e1.getMessage());
 		}
 		
-		logger.debug("Parse the result list for node " + ExpandedNodeId.parseExpandedNodeId(context.getProperty(STARTING_NODE).getValue()).toString());
+		// Parse the node tree 
 		
 		if ( starting_node == null) {
-			parseNodeTree(mySession, ExpandedNodeId.parseExpandedNodeId(Identifiers.RootFolder.toString()), logger);
-		} else {
-			parseNodeTree(mySession, ExpandedNodeId.parseExpandedNodeId(context.getProperty(STARTING_NODE).getValue()), logger);
-		}
-		
+			logger.debug("Parse the result list for node " + new ExpandedNodeId(Identifiers.RootFolder));
+			parseNodeTree(mySession, new ExpandedNodeId(Identifiers.RootFolder), logger);
 			
+		} else {
+			logger.debug("Parse the result list for node " + new ExpandedNodeId(NodeId.parseNodeId(context.getProperty(STARTING_NODE).getValue())));
+			parseNodeTree(mySession, new ExpandedNodeId(NodeId.parseNodeId(context.getProperty(STARTING_NODE).getValue())), logger);
+		}
 		
 		// Write the results back out to flow file
 		FlowFile flowFile = session.create();
@@ -279,9 +280,8 @@ public class GetEndpointDescriptions extends AbstractProcessor {
         	logger.error("Flowfile is null");
         }
 		
+        // Transfer data to flow file
 		flowFile = session.write(flowFile, new OutputStreamCallback() {
-
-            @Override
             public void process(OutputStream out) throws IOException {
             	out.write(stringBuilder.toString().getBytes());
             	
@@ -313,7 +313,6 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		// If we have already reached the max depth
 		if (recursiveDepth > max_recursiveDepth){
 			
-			recursiveDepth = 0;
 			return;
 			
 		} else {
@@ -381,7 +380,6 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 			
 			if (recursiveDepth > max_recursiveDepth){
 				// If we have reached the defined max depth then break this loop ( avoids infinite recursion )
-				recursiveDepth = 0;
 				break;
 			}else {
 				
