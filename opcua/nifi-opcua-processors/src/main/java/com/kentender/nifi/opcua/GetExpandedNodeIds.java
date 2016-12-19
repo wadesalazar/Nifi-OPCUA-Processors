@@ -76,7 +76,7 @@ import org.opcfoundation.ua.utils.CertificateUtils;
 @ReadsAttributes({@ReadsAttribute(attribute="", description="")})
 @WritesAttributes({@WritesAttribute(attribute="", description="")})
 
-public class GetExpanedNodeIds extends AbstractProcessor {
+public class GetExpandedNodeIds extends AbstractProcessor {
 	
 	
 	// TODO clean up static vars and implement private where needed
@@ -150,7 +150,7 @@ public class GetExpanedNodeIds extends AbstractProcessor {
             .build();
     
     public static final Relationship FAILURE = new Relationship.Builder()
-            .name("FAILURE")
+            .name("Failure")
             .description("Failed OPC read")
             .build();
 

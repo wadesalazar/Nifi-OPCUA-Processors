@@ -113,20 +113,6 @@ public class FetchOPCUA extends AbstractProcessor {
             .allowableValues("opc.tcp")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
-
-    // TODO make this optional, either a prefix can be used or the whole node id will need to be suppplied as input
-    public static final PropertyDescriptor PREFIX = new PropertyDescriptor
-            .Builder().name("Target prefix")
-            .description("Identify the device and channel to be used ")
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .build();
-      
-    // TODO We can use this to create an expanded node id from the node id provided
-    public static final PropertyDescriptor NAMESPACE = new PropertyDescriptor
-            .Builder().name("Namespace")
-            .description("Integer value of name space to read from")
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .build();
     
     public static final Relationship SUCCESS = new Relationship.Builder()
             .name("Success")
@@ -148,8 +134,6 @@ public class FetchOPCUA extends AbstractProcessor {
         descriptors.add(ENDPOINT);
         descriptors.add(SECURITY_POLICY);
         descriptors.add(APPLICATION_NAME);
-        descriptors.add(PREFIX);
-        descriptors.add(NAMESPACE);
         descriptors.add(PROTOCOL);
         this.descriptors = Collections.unmodifiableList(descriptors);
 
