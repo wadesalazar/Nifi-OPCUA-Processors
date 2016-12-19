@@ -76,7 +76,7 @@ import org.opcfoundation.ua.utils.CertificateUtils;
 @ReadsAttributes({@ReadsAttribute(attribute="", description="")})
 @WritesAttributes({@WritesAttribute(attribute="", description="")})
 
-public class GetEndpointDescriptions extends AbstractProcessor {
+public class GetExpanedNodeIds extends AbstractProcessor {
 	
 	
 	// TODO clean up static vars and implement private where needed
@@ -198,11 +198,9 @@ public class GetEndpointDescriptions extends AbstractProcessor {
 		print_indentation = context.getProperty(PRINT_INDENTATION).getValue();
 		max_recursiveDepth = Integer.valueOf(context.getProperty(RECURSIVE_DEPTH).getValue());
 		url = context.getProperty(ENDPOINT).getValue();
-		
-		logger.debug(print_indentation);
+		starting_node = context.getProperty(STARTING_NODE).getValue();
 		
 		// Load Client's certificates from file or create new certs
-		
 		if (context.getProperty(SECURITY_POLICY).getValue() == "None"){
 			// Build OPC Client
 			myClientApplicationInstanceCertificate = null;

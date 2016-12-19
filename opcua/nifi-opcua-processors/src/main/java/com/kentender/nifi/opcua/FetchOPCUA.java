@@ -49,31 +49,16 @@ import org.opcfoundation.ua.core.ReadRequest;
 import org.opcfoundation.ua.core.ReadResponse;
 import org.opcfoundation.ua.core.ReadValueId;
 import org.opcfoundation.ua.core.TimestampsToReturn;
-import org.opcfoundation.ua.transport.security.Cert;
 import org.opcfoundation.ua.transport.security.KeyPair;
-import org.opcfoundation.ua.transport.security.PrivKey;
 import org.opcfoundation.ua.transport.security.SecurityPolicy;
-import org.opcfoundation.ua.utils.CertificateUtils;
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateException;
-import java.security.spec.InvalidKeySpecException;
-import java.security.spec.InvalidParameterSpecException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-
-import javax.crypto.BadPaddingException;
-import javax.crypto.IllegalBlockSizeException;
-import javax.crypto.NoSuchPaddingException;
 
 @Tags({"OPC", "OPCUA", "UA"})
 @CapabilityDescription("Fetches a response from an OPC UA server based on configured name space and input item names")
@@ -85,17 +70,18 @@ import javax.crypto.NoSuchPaddingException;
 
 public class FetchOPCUA extends AbstractProcessor {
 	
+	// TODO add scope for vars
 	public static final Locale ENGLISH = Locale.ENGLISH;
+	static KeyPair myClientApplicationInstanceCertificate = null;
+	static KeyPair myHttpsCertificate = null;
+	static String applicationName = "Apache Nifi";
+	static String url = "";
 	
 	// Create Client
 	Client myClient = null;
 	EndpointDescription[] endpoints = null;
 	SessionChannel mySession = null;
 	ReadResponse res = null;
-	
-	//TODO obviously needs to be handled by a property
-	private static final String PRIVKEY_PASSWORD = "Opc.Ua";
-	
 
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
@@ -111,8 +97,9 @@ public class FetchOPCUA extends AbstractProcessor {
             .allowableValues("None", "Basic128Rsa15", "Basic256", "Basic256Rsa256")
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
-    // TODO change this to application and implement in the same manner as getendpoint
-    public static final PropertyDescriptor CLIENT_CERT = new PropertyDescriptor
+    
+    // TODO change this to application and implement in the same manner as get endpoint
+    public static final PropertyDescriptor APPLICATION_NAME = new PropertyDescriptor
             .Builder().name("Client Certificate")
             .description("Certificate to identify the client when connecting to the UA server")
             .required(false)
@@ -131,7 +118,6 @@ public class FetchOPCUA extends AbstractProcessor {
     public static final PropertyDescriptor PREFIX = new PropertyDescriptor
             .Builder().name("Target prefix")
             .description("Identify the device and channel to be used ")
-            .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
       
@@ -139,7 +125,6 @@ public class FetchOPCUA extends AbstractProcessor {
     public static final PropertyDescriptor NAMESPACE = new PropertyDescriptor
             .Builder().name("Namespace")
             .description("Integer value of name space to read from")
-            .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
     
@@ -162,7 +147,7 @@ public class FetchOPCUA extends AbstractProcessor {
         final List<PropertyDescriptor> descriptors = new ArrayList<PropertyDescriptor>();
         descriptors.add(ENDPOINT);
         descriptors.add(SECURITY_POLICY);
-        descriptors.add(CLIENT_CERT);
+        descriptors.add(APPLICATION_NAME);
         descriptors.add(PREFIX);
         descriptors.add(NAMESPACE);
         descriptors.add(PROTOCOL);
@@ -188,14 +173,79 @@ public class FetchOPCUA extends AbstractProcessor {
     public void onScheduled(final ProcessContext context) {
     	
     	final ComponentLog logger = getLogger();
+    	
+    	applicationName = context.getProperty(APPLICATION_NAME).getValue();
+    	url = context.getProperty(ENDPOINT).getValue();
 		
-		updateEndpoints(context);
+    	// Load Client's certificates from file or create new certs
+		if (context.getProperty(SECURITY_POLICY).getValue() == "None"){
+			// Build OPC Client
+			myClientApplicationInstanceCertificate = null;
+						
+		} else {
+
+			myHttpsCertificate = Utils.getHttpsCert(applicationName);
+			
+			// Load or create HTTP and Client's Application Instance Certificate and key
+			switch (context.getProperty(SECURITY_POLICY).getValue()) {
+				
+				case "Basic128Rsa15":{
+					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC128RSA15);
+					break;
+					
+				}case "Basic256": {
+					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC256);
+					break;
+					
+				}case "Basic256Rsa256": {
+					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC256SHA256);
+					break;
+				}
+			}
+		}
 		
 		// Create Client
+		// TODO need to move this to service or on schedule method
+		myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
+		myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
 		myClient.getApplication().addLocale( ENGLISH );
-		myClient.getApplication().setApplicationName( new LocalizedText("Java Sample Client", Locale.ENGLISH) );
-		myClient.getApplication().setProductUri( "urn:NifiClient" );
-		myClient.setTimeout( 10000 );
+		myClient.getApplication().setApplicationName( new LocalizedText(applicationName, Locale.ENGLISH) );
+		myClient.getApplication().setProductUri( "urn:" + applicationName );
+		
+		// Retrieve and filter end point list
+		// TODO need to move this to service or on schedule method
+		
+		try {
+			endpoints = myClient.discoverEndpoints(url);
+		} catch (ServiceResultException e1) {
+			// TODO Auto-generated catch block
+			
+			logger.error(e1.getMessage());
+		}
+		
+		switch (context.getProperty(SECURITY_POLICY).getValue()) {
+			
+			case "Basic128Rsa15":{
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC128RSA15);
+				break;
+			}
+			case "Basic256": {
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256);
+				break;
+			}	
+			case "Basic256Rsa256": {
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256SHA256);
+				break;
+			}
+			default :{
+				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
+				logger.error("No security mode specified");
+				break;
+			}
+		}
+		
+		// For now only opc.tcp has been implemented
+		endpoints = selectByProtocol(endpoints, "opc.tcp");
 		
 	}
 
@@ -207,7 +257,7 @@ public class FetchOPCUA extends AbstractProcessor {
     	
     	final ComponentLog logger = getLogger();
     	
-    	//Init response variable
+    	// Initialize  response variable
         final AtomicReference<String> reqTagname = new AtomicReference<>();
         final AtomicReference<String> serverResponse = new AtomicReference<>();
         
@@ -239,15 +289,9 @@ public class FetchOPCUA extends AbstractProcessor {
         
         // Build nodes to read string 
         // TODO move this to a expanded node id created from the input string
-        String nodeId = "ns=" 
-				+ context.getProperty(NAMESPACE).getValue()
-				+ ";s="
-				+ context.getProperty(PREFIX).getValue()
-				+ "."
-				+ reqTagname.get();
-        
+
         ReadValueId[] NodesToRead = { 
-				new ReadValueId(NodeId.parseNodeId(nodeId), Attributes.Value, null, null ),
+				new ReadValueId(NodeId.parseNodeId(reqTagname.get()), Attributes.Value, null, null )
 		};
         
         // Form OPC request
@@ -319,124 +363,5 @@ public class FetchOPCUA extends AbstractProcessor {
 		}
         
     }
-    
-    
-    // TODO this is the basis of the controller service that needs to be implemented
-    public void updateEndpoints(final ProcessContext context){
-    	
-    	final ComponentLog logger = getLogger();
-    	
- 		try {
- 			
- 			// Retrieve selected discovery URL an end point
-			String url = context.getProperty(ENDPOINT).getValue();
-			
-			// Handle the selection of security policy
-			
-			if (context.getProperty(SECURITY_POLICY).getValue() == "None"){
-				// Build OPC Client
-				myClient = Client.createClientApplication( null );
-				
-				// Retrieve End point List
-				endpoints = myClient.discoverEndpoints(url);
-				
-				// Filter end points based on selected policy
-				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
-				
-			} else {
-				
-				KeyPair myClientApplicationInstanceCertificate = null;
-				KeyPair myHttpsCertificate = null;
-				String client_cert = context.getProperty(CLIENT_CERT).getValue();
-				
-				myHttpsCertificate = Utils.getHttpsCert("NifiHClient");
-				
-				switch (context.getProperty(SECURITY_POLICY).getValue()) {
-					
- 				case "Basic128Rsa15":{
- 					
- 					// Load or create Client's Application Instance Certificate and key
- 					if (client_cert != null){
- 						logger.debug(client_cert + " is the current cert being used");
- 						myClientApplicationInstanceCertificate = Utils.getCert(client_cert);
- 	 				} else {
- 						logger.debug("Setting security policy to Basic 128");
- 						myClientApplicationInstanceCertificate = Utils.getCert("NifiClient", SecurityPolicy.BASIC128RSA15);
- 	 				}
- 					
- 					// Build OPC Client
- 					myClient = Client.createClientApplication( myClientApplicationInstanceCertificate );
- 					myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
- 					
- 					// Retrieve End point List
- 					endpoints = myClient.discoverEndpoints(url);
- 					
- 					// Filter end points based on selected policy
- 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC128RSA15);
- 					
- 					break;
- 					
- 				}
- 				
- 				case "Basic256": {
- 					
- 					// Load or create HTTP and Client's Application Instance Certificate and key
- 					if (client_cert != null){
- 						logger.debug(client_cert + " is the current cert being used");
- 						myClientApplicationInstanceCertificate =Utils. getCert(client_cert);
- 	 				} else {
- 						logger.debug("Setting security policy to Basic 256");
- 						myClientApplicationInstanceCertificate = Utils.getCert("NifiClient", SecurityPolicy.BASIC256);
- 	 				}
- 					
- 					// Build OPC Client
- 					myClient = Client.createClientApplication( myClientApplicationInstanceCertificate );
- 					myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
- 					
- 					// Retrieve End point List
- 					endpoints = myClient.discoverEndpoints(url);
- 					
- 					// Filter end points based on selected policy
- 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256);
- 					
- 					break;
- 					
- 				}
- 				
- 				case "Basic256Rsa256": {
- 					
- 					// Load or create HTTP and Client's Application Instance Certificate and key
- 					if (client_cert != null){
- 						logger.debug(client_cert + " is the provided certificate is being used");
- 						myClientApplicationInstanceCertificate = Utils.getCert(client_cert);
- 	 				} else {
- 						logger.debug("Setting security policy to Basic 256");
- 						myClientApplicationInstanceCertificate = Utils.getCert("NifiClient", SecurityPolicy.BASIC256);
- 	 				}
- 					
- 					// Build OPC Client
- 					myClient = Client.createClientApplication( myClientApplicationInstanceCertificate );
- 					myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
- 					
- 					// Retrieve End point List
- 					endpoints = myClient.discoverEndpoints(url);
- 					
- 					// Filter end points based on selected policy
- 					endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256SHA256);
- 					
- 					break;
- 					
- 				}}
-				
-			}
-			
-			// Filter based on protocol selection
-			endpoints = selectByProtocol(endpoints, "opc.tcp");
- 			
- 		} catch (ServiceResultException e) {
- 			// TODO Auto-generated catch block
- 			e.printStackTrace();
- 		}
-    }    
     
 }
