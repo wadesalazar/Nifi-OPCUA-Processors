@@ -100,8 +100,8 @@ public class FetchOPCUA extends AbstractProcessor {
     
     // TODO change this to application and implement in the same manner as get endpoint
     public static final PropertyDescriptor APPLICATION_NAME = new PropertyDescriptor
-            .Builder().name("Client Certificate")
-            .description("Certificate to identify the client when connecting to the UA server")
+    		.Builder().name("Application Name")
+            .description("The application name is used to label certificates identifying this application")
             .required(false)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
