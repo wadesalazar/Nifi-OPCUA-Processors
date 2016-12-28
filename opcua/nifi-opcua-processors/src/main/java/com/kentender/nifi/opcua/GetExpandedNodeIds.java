@@ -85,7 +85,7 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 	static int recursiveDepth = 0;
 	static StringBuilder stringBuilder = new StringBuilder();
 	static String url = "";
-	static String applicationName = "Apache Nifi";
+	static String applicationName = null;
 	static KeyPair myClientApplicationInstanceCertificate = null;
 	static KeyPair myHttpsCertificate = null;
 	static String outputFilename = null;
@@ -242,7 +242,6 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 			endpoints = myClient.discoverEndpoints(url);
 		} catch (ServiceResultException e1) {
 			// TODO Auto-generated catch block
-			
 			logger.error(e1.getMessage());
 		}
 		

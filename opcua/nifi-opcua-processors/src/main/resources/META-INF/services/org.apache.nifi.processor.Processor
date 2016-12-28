@@ -14,3 +14,4 @@
 # limitations under the License.
 com.kentender.nifi.opcua.FetchOPCUA
 com.kentender.nifi.opcua.GetExpandedNodeIds
+com.kentender.nifi.opcua.GetEndpoints
