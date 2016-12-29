@@ -51,6 +51,8 @@ import org.opcfoundation.ua.core.ReadValueId;
 import org.opcfoundation.ua.core.TimestampsToReturn;
 import org.opcfoundation.ua.transport.security.KeyPair;
 import org.opcfoundation.ua.transport.security.SecurityPolicy;
+import org.opcfoundation.ua.utils.EndpointUtil;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -231,6 +233,10 @@ public class FetchOPCUA extends AbstractProcessor {
 		// For now only opc.tcp has been implemented
 		endpoints = selectByProtocol(endpoints, "opc.tcp");
 		
+		// Finally confirm the provided end point is in the list
+ 		endpoints = EndpointUtil.selectByUrl(endpoints, url);
+ 		
+ 		logger.debug(endpoints.length + " endpoints found");
 	}
 
     /* (non-Javadoc)

@@ -189,37 +189,9 @@ public class GetEndpoints extends AbstractProcessor{
  			logger.error(e1.getMessage());
  		}
  		
- 		switch (context.getProperty(SECURITY_POLICY).getValue()) {
- 			
- 			case "Basic128Rsa15":{
- 				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC128RSA15);
- 				break;
- 			}
- 			case "Basic256": {
- 				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256);
- 				break;
- 			}	
- 			case "Basic256Rsa256": {
- 				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.BASIC256SHA256);
- 				break;
- 			}
- 			default :{
- 				endpoints = selectBySecurityPolicy(endpoints,SecurityPolicy.NONE);
- 				logger.error("No security mode specified");
- 				break;
- 			}
- 		}
-     		
- 		// For now only opc.tcp has been implemented
- 		endpoints = selectByProtocol(endpoints, "opc.tcp");
- 		
- 		// Finally confirm the provided end point is in the list
- 		endpoints = EndpointUtil.selectByUrl(endpoints, url);
- 		
- 		logger.debug(endpoints.length + " endpoints found");
         
         for (int i = 0; i < endpoints.length; i++){
-        	stringBuilder.append(endpoints[i].getEndpointUrl() + " - " + endpoints[i].getSecurityPolicyUri() + System.lineSeparator());
+        	stringBuilder.append(endpoints[i].getEndpointUrl() + " - " + endpoints[i].getSecurityPolicyUri() + System.lineSeparator() + " - " + endpoints[i].getSecurityMode() );
         	
         }
  		
