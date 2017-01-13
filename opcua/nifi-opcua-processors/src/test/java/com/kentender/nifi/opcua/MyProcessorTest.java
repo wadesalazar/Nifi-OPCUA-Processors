@@ -28,7 +28,7 @@ public class MyProcessorTest {
 
     @Before
     public void init() {
-        testRunner = TestRunners.newTestRunner(FetchOPCUA.class);
+        testRunner = TestRunners.newTestRunner(GetValue.class);
     }
 
     @Test

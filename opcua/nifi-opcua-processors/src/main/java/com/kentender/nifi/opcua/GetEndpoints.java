@@ -1,8 +1,5 @@
 package com.kentender.nifi.opcua;
 
-import static org.opcfoundation.ua.utils.EndpointUtil.selectByProtocol;
-import static org.opcfoundation.ua.utils.EndpointUtil.selectBySecurityPolicy;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -35,10 +32,8 @@ import org.opcfoundation.ua.application.SessionChannel;
 import org.opcfoundation.ua.builtintypes.LocalizedText;
 import org.opcfoundation.ua.common.ServiceResultException;
 import org.opcfoundation.ua.core.EndpointDescription;
-import org.opcfoundation.ua.core.ReadResponse;
 import org.opcfoundation.ua.transport.security.KeyPair;
 import org.opcfoundation.ua.transport.security.SecurityPolicy;
-import org.opcfoundation.ua.utils.EndpointUtil;
 
 @Tags({"OPC", "OPCUA", "UA"})
 @CapabilityDescription("Fetches a response from an OPC UA server based on configured name space and input item names")
@@ -48,19 +43,12 @@ import org.opcfoundation.ua.utils.EndpointUtil;
 
 public class GetEndpoints extends AbstractProcessor{
 
-	// TODO add scope for vars
 	public static final Locale ENGLISH = Locale.ENGLISH;
-	static KeyPair myClientApplicationInstanceCertificate = null;
-	static KeyPair myHttpsCertificate = null;
-	static String applicationName = null;
-	static String url = "";
 	
-	// Create Client
-	Client myClient = null;
-	EndpointDescription[] endpoints = null;
-	SessionChannel mySession = null;
-	ReadResponse res = null;
-
+	static Client myClient = null;
+	static EndpointDescription[] endpointDescriptions = null;
+	static SessionChannel mySession = null;
+	
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
             .description("the opc.tcp address of the opc ua server")
@@ -76,7 +64,6 @@ public class GetEndpoints extends AbstractProcessor{
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
     
-    // TODO change this to application and implement in the same manner as get endpoint
     public static final PropertyDescriptor APPLICATION_NAME = new PropertyDescriptor
     		.Builder().name("Application Name")
             .description("The application name is used to label certificates identifying this application")
@@ -127,8 +114,8 @@ public class GetEndpoints extends AbstractProcessor{
     	
     	final ComponentLog logger = getLogger();
     	
-    	url = context.getProperty(ENDPOINT).getValue();
-    	applicationName = context.getProperty(APPLICATION_NAME).getValue();
+    	KeyPair myClientApplicationInstanceCertificate = null;
+    	KeyPair myHttpsCertificate = null;
     	
 		// Load Client's certificates from file or create new certs
 		if (context.getProperty(SECURITY_POLICY).getValue() == "None"){
@@ -137,34 +124,32 @@ public class GetEndpoints extends AbstractProcessor{
 						
 		} else {
 
-			myHttpsCertificate = Utils.getHttpsCert(applicationName);
+			myHttpsCertificate = Utils.getHttpsCert(context.getProperty(APPLICATION_NAME).getValue());
 			
 			// Load or create HTTP and Client's Application Instance Certificate and key
 			switch (context.getProperty(SECURITY_POLICY).getValue()) {
 				
 				case "Basic128Rsa15":{
-					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC128RSA15);
+					myClientApplicationInstanceCertificate = Utils.getCert(context.getProperty(APPLICATION_NAME).getValue(), SecurityPolicy.BASIC128RSA15);
 					break;
 					
 				}case "Basic256": {
-					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC256);
+					myClientApplicationInstanceCertificate = Utils.getCert(context.getProperty(APPLICATION_NAME).getValue(), SecurityPolicy.BASIC256);
 					break;
 					
 				}case "Basic256Rsa256": {
-					myClientApplicationInstanceCertificate = Utils.getCert(applicationName, SecurityPolicy.BASIC256SHA256);
+					myClientApplicationInstanceCertificate = Utils.getCert(context.getProperty(APPLICATION_NAME).getValue(), SecurityPolicy.BASIC256SHA256);
 					break;
 				}
 			}
 		}
 		
 		// Create Client
-		// TODO need to move this to service or on schedule method
 		myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
 		myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
 		myClient.getApplication().addLocale( ENGLISH );
-		myClient.getApplication().setApplicationName( new LocalizedText(applicationName, Locale.ENGLISH) );
-		myClient.getApplication().setProductUri( "urn:" + applicationName );
-		
+		myClient.getApplication().setApplicationName( new LocalizedText(context.getProperty(APPLICATION_NAME).getValue(), Locale.ENGLISH) );
+		myClient.getApplication().setProductUri( "urn:" + context.getProperty(APPLICATION_NAME).getValue() );
 		
 	}
 
@@ -177,21 +162,18 @@ public class GetEndpoints extends AbstractProcessor{
     	final ComponentLog logger = getLogger();
     	StringBuilder stringBuilder = new StringBuilder();
         
-        // Retrieve and filter end point list
- 		// TODO need to move this to service or on schedule method
- 		
+        // Retrieve end point list
  		try {
- 			endpoints = null;
- 			endpoints = myClient.discoverEndpoints(url);
+ 			endpointDescriptions = null;
+ 			endpointDescriptions = myClient.discoverEndpoints(context.getProperty(ENDPOINT).getValue());
  		} catch (ServiceResultException e1) {
- 			// TODO Auto-generated catch block
  			
  			logger.error(e1.getMessage());
  		}
  		
         
-        for (int i = 0; i < endpoints.length; i++){
-        	stringBuilder.append(endpoints[i].getEndpointUrl() + " - " + endpoints[i].getSecurityPolicyUri() + System.lineSeparator() + " - " + endpoints[i].getSecurityMode() );
+        for (int i = 0; i < endpointDescriptions.length; i++){
+        	stringBuilder.append(endpointDescriptions[i].getEndpointUrl() + " - " + endpointDescriptions[i].getSecurityPolicyUri()  + " - " + endpointDescriptions[i].getSecurityMode() + System.lineSeparator());
         	
         }
  		
