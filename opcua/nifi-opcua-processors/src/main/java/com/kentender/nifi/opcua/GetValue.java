@@ -75,12 +75,9 @@ import java.util.stream.Collectors;
 
 public class GetValue extends AbstractProcessor {
 	
-	// TODO add scope for vars
-	public static final Locale ENGLISH = Locale.ENGLISH;
-
 	// Create Client
-	static Client myClient = null;
-	static SessionChannel mySession = null;
+	private static Client myClient = null;
+	private static SessionChannel mySession = null;
 
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
@@ -110,14 +107,6 @@ public class GetValue extends AbstractProcessor {
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
     
-    public static final PropertyDescriptor PROTOCOL = new PropertyDescriptor
-            .Builder().name("Transfer Protocol")
-            .description("How should Nifi communicate with the OPC server")
-            .required(true)
-            .allowableValues("opc.tcp")
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .build();
-    
     public static final Relationship SUCCESS = new Relationship.Builder()
             .name("Success")
             .description("Successful OPC read")
@@ -139,7 +128,6 @@ public class GetValue extends AbstractProcessor {
         descriptors.add(SECURITY_POLICY);
         descriptors.add(APPLICATION_NAME);
         descriptors.add(SERVER_CERT);
-        descriptors.add(PROTOCOL);
         this.descriptors = Collections.unmodifiableList(descriptors);
 
         final Set<Relationship> relationships = new HashSet<Relationship>();
@@ -197,7 +185,7 @@ public class GetValue extends AbstractProcessor {
 		// Create Client
 		myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
 		myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
-		myClient.getApplication().addLocale( ENGLISH );
+		myClient.getApplication().addLocale( Locale.ENGLISH );
 		myClient.getApplication().setApplicationName( new LocalizedText(context.getProperty(APPLICATION_NAME).getValue(), Locale.ENGLISH) );
 		myClient.getApplication().setProductUri( "urn:" + context.getProperty(APPLICATION_NAME).getValue() );
 		
@@ -289,7 +277,7 @@ public class GetValue extends AbstractProcessor {
   			
   		} catch (ServiceResultException e1) {
   			// TODO Auto-generated catch block THIS NEEDS TO FAIL IN A SPECIAL WAY TO BE RE TRIED 
-  			e1.printStackTrace();
+  			logger.error(e1.getMessage());
   		}
 		
 	}

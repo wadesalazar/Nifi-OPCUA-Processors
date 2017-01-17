@@ -112,8 +112,6 @@ public class GetEndpoints extends AbstractProcessor{
     @OnScheduled
     public void onScheduled(final ProcessContext context) {
     	
-    	final ComponentLog logger = getLogger();
-    	
     	KeyPair myClientApplicationInstanceCertificate = null;
     	KeyPair myHttpsCertificate = null;
     	

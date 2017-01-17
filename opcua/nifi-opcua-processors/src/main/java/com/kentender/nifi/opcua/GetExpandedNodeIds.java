@@ -3,18 +3,9 @@ package com.kentender.nifi.opcua;
 import static org.opcfoundation.ua.utils.EndpointUtil.selectByProtocol;
 import static org.opcfoundation.ua.utils.EndpointUtil.selectBySecurityPolicy;
 
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetAddress;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateException;
-import java.security.spec.InvalidKeySpecException;
-import java.security.spec.InvalidParameterSpecException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -23,11 +14,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
-import javax.crypto.BadPaddingException;
-import javax.crypto.IllegalBlockSizeException;
-import javax.crypto.NoSuchPaddingException;
-
-import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.ReadsAttribute;
 import org.apache.nifi.annotation.behavior.ReadsAttributes;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
@@ -53,11 +39,9 @@ import org.opcfoundation.ua.application.SessionChannel;
 import org.opcfoundation.ua.builtintypes.ExpandedNodeId;
 import org.opcfoundation.ua.builtintypes.LocalizedText;
 import org.opcfoundation.ua.builtintypes.NodeId;
-import org.opcfoundation.ua.builtintypes.UnsignedByte;
 import org.opcfoundation.ua.builtintypes.UnsignedInteger;
 import org.opcfoundation.ua.common.ServiceFaultException;
 import org.opcfoundation.ua.common.ServiceResultException;
-import org.opcfoundation.ua.core.ApplicationDescription;
 import org.opcfoundation.ua.core.BrowseDescription;
 import org.opcfoundation.ua.core.BrowseDirection;
 import org.opcfoundation.ua.core.BrowseRequest;
@@ -68,12 +52,9 @@ import org.opcfoundation.ua.core.IdType;
 import org.opcfoundation.ua.core.Identifiers;
 import org.opcfoundation.ua.core.MessageSecurityMode;
 import org.opcfoundation.ua.core.ReferenceDescription;
-import org.opcfoundation.ua.core.UserTokenPolicy;
 import org.opcfoundation.ua.transport.security.Cert;
 import org.opcfoundation.ua.transport.security.KeyPair;
-import org.opcfoundation.ua.transport.security.PrivKey;
 import org.opcfoundation.ua.transport.security.SecurityPolicy;
-import org.opcfoundation.ua.utils.CertificateUtils;
 
 @Tags({"OPC", "OPCUA", "UA"})
 @CapabilityDescription("Retrieves the namespace from an OPC UA server")
@@ -83,9 +64,8 @@ import org.opcfoundation.ua.utils.CertificateUtils;
 
 public class GetExpandedNodeIds extends AbstractProcessor {
 	
-	// TODO clean up static vars and implement private where needed
-	static Client myClient = null;
-	static SessionChannel mySession = null;
+	private static Client myClient = null;
+	private static SessionChannel mySession = null;
 	
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
@@ -127,12 +107,6 @@ public class GetExpandedNodeIds extends AbstractProcessor {
             .required(true)
             .addValidator(StandardValidators.NON_BLANK_VALIDATOR)
             .build();
-    
-    public static final PropertyDescriptor OUTFILE_NAME = new PropertyDescriptor
-            .Builder().name("Output filename")
-            .description("File path and name used for output")
-            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
-            .build();
 	
     public static final PropertyDescriptor PRINT_INDENTATION = new PropertyDescriptor
             .Builder().name("Print Indentation")
@@ -161,12 +135,11 @@ public class GetExpandedNodeIds extends AbstractProcessor {
     protected void init(final ProcessorInitializationContext context) {
         final List<PropertyDescriptor> descriptors = new ArrayList<PropertyDescriptor>();
         descriptors.add(ENDPOINT);
-        descriptors.add(RECURSIVE_DEPTH);
         descriptors.add(SECURITY_POLICY);
         descriptors.add(SERVER_CERT);
-        descriptors.add(STARTING_NODE);
         descriptors.add(APPLICATION_NAME);
-        descriptors.add(OUTFILE_NAME);
+        descriptors.add(STARTING_NODE);
+        descriptors.add(RECURSIVE_DEPTH);
         descriptors.add(PRINT_INDENTATION);
 
         this.descriptors = Collections.unmodifiableList(descriptors);
@@ -224,7 +197,6 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 		}
 		
 		// Create Client
-		// TODO need to move this to service or on schedule method
 		myClient = Client.createClientApplication( myClientApplicationInstanceCertificate ); 
 		myClient.getApplication().getHttpsSettings().setKeyPair(myHttpsCertificate);
 		myClient.getApplication().addLocale( Locale.ENGLISH );
@@ -240,12 +212,8 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 				File myCertFile = new File(context.getProperty(SERVER_CERT).getValue());
 				myOwnCert = Cert.load(myCertFile);
 				
-			} catch (CertificateException e1) {
-				// TODO Auto-generated catch block
-				e1.printStackTrace();
-			} catch (IOException e1) {
-				// TODO Auto-generated catch block
-				e1.printStackTrace();
+			} catch (Exception e1) {
+				logger.error(e1.getMessage());
 			}
 			
 			// Describe end point
@@ -279,7 +247,6 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 			try {
 				endpointDescriptions = myClient.discoverEndpoints(context.getProperty(ENDPOINT).getValue());
 			} catch (ServiceResultException e1) {
-				// TODO Auto-generated catch block
 				
 				logger.error(e1.getMessage());
 			}
@@ -318,7 +285,6 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 			mySession = myClient.createSessionChannel(endpointDescription);
 			mySession.activate();	
 		} catch (ServiceResultException e1) {
-			// TODO Auto-generated catch block
 			logger.error(e1.getMessage());
 		}
     }
@@ -331,10 +297,8 @@ public class GetExpandedNodeIds extends AbstractProcessor {
         try {
 			mySession.close();
 		} catch (ServiceFaultException e) {
-			// TODO Auto-generated catch block
 			logger.error(e.getMessage());
 		} catch (ServiceResultException e) {
-			// TODO Auto-generated catch block
 			logger.error(e.getMessage());
 		}
         
@@ -430,13 +394,11 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 		BrowseResponse browseResponse = new BrowseResponse();
 		try {
 			browseResponse = mySession.Browse(browseRequest);
-		} catch (ServiceFaultException e) {
-			// TODO Auto-generated catch block
+		} catch (Exception e) {
+
 			e.printStackTrace();
-		} catch (ServiceResultException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+			
+		} 
 		
 		// Get results
 		BrowseResult[] browseResults = browseResponse.getResults();
