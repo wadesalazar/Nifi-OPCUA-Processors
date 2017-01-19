@@ -42,8 +42,11 @@ import org.opcfoundation.ua.application.SessionChannel;
 import org.opcfoundation.ua.builtintypes.DataValue;
 import org.opcfoundation.ua.builtintypes.LocalizedText;
 import org.opcfoundation.ua.builtintypes.NodeId;
+import org.opcfoundation.ua.builtintypes.ServiceRequest;
 import org.opcfoundation.ua.common.ServiceFaultException;
 import org.opcfoundation.ua.common.ServiceResultException;
+import org.opcfoundation.ua.core.ActivateSessionRequest;
+import org.opcfoundation.ua.core.ActivateSessionResponse;
 import org.opcfoundation.ua.core.Attributes;
 import org.opcfoundation.ua.core.EndpointDescription;
 import org.opcfoundation.ua.core.MessageSecurityMode;
@@ -51,6 +54,7 @@ import org.opcfoundation.ua.core.ReadRequest;
 import org.opcfoundation.ua.core.ReadResponse;
 import org.opcfoundation.ua.core.ReadValueId;
 import org.opcfoundation.ua.core.TimestampsToReturn;
+import org.opcfoundation.ua.transport.SecureChannel;
 import org.opcfoundation.ua.transport.security.Cert;
 import org.opcfoundation.ua.transport.security.KeyPair;
 import org.opcfoundation.ua.transport.security.SecurityPolicy;
@@ -78,6 +82,7 @@ public class GetValue extends AbstractProcessor {
 	// Create Client
 	private static Client myClient = null;
 	private static SessionChannel mySession = null;
+	private static EndpointDescription endpointDescription = null;
 
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
@@ -120,6 +125,7 @@ public class GetValue extends AbstractProcessor {
     private List<PropertyDescriptor> descriptors;
 
     private Set<Relationship> relationships;
+	private byte[] myNonce;
 
     @Override
     protected void init(final ProcessorInitializationContext context) {
@@ -151,7 +157,7 @@ public class GetValue extends AbstractProcessor {
     	
     	final ComponentLog logger = getLogger();
     	EndpointDescription[] endpointDescriptions = null;
-    	EndpointDescription endpointDescription = null;
+    	
     	KeyPair myClientApplicationInstanceCertificate = null;
     	KeyPair myHttpsCertificate = null;
     	
@@ -267,18 +273,14 @@ public class GetValue extends AbstractProcessor {
 			endpointDescription = endpointDescriptions[0].clone();
 	 	}
 	
-		logger.debug("Using endpoint: " + endpointDescription.toString());
 		
-		// Create and activate session 
-  		
-  		try {
-  			mySession = myClient.createSessionChannel(endpointDescription);
-  			mySession.activate();
-  			
-  		} catch (ServiceResultException e1) {
-  			// TODO Auto-generated catch block THIS NEEDS TO FAIL IN A SPECIAL WAY TO BE RE TRIED 
-  			logger.error(e1.getMessage());
-  		}
+		try {
+			mySession = myClient.createSessionChannel(endpointDescription);
+		} catch (ServiceResultException e) {
+			// TODO Auto-generated catch block
+			logger.debug("Error while creating initial SessionChannel: ");
+			logger.error(e.getMessage());
+		}
 		
 	}
 
@@ -297,6 +299,8 @@ public class GetValue extends AbstractProcessor {
         
         myClient = null;
     	mySession = null;
+    	
+
     }
     
     @Override
@@ -304,6 +308,24 @@ public class GetValue extends AbstractProcessor {
     	
     	final ComponentLog logger = getLogger();
     	
+    	// Test session and if closed create and activate new session 
+    	try {
+    		mySession.activate();
+  		} catch (ServiceResultException e1) {
+  			
+  			logger.debug("The session " + mySession.getSession().getAuthenticationToken() + " has timed out.");
+  			try {
+  				logger.debug("Creating new session");
+				mySession = myClient.createSessionChannel(endpointDescription);
+				mySession.activate();
+			} catch (ServiceResultException e) {
+				logger.debug("Error while creating new session: ");
+				logger.error(e.getMessage());
+			}
+  			
+  		}
+    	
+    	    	
     	// Initialize  response variable
         final AtomicReference<String> reqTagname = new AtomicReference<>();
         final AtomicReference<String> serverResponse = new AtomicReference<>();

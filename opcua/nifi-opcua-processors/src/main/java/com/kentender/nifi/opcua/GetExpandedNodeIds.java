@@ -66,6 +66,7 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 	
 	private static Client myClient = null;
 	private static SessionChannel mySession = null;
+	private static EndpointDescription endpointDescription = null;
 	
 	public static final PropertyDescriptor ENDPOINT = new PropertyDescriptor
             .Builder().name("Endpoint URL")
@@ -165,7 +166,7 @@ public class GetExpandedNodeIds extends AbstractProcessor {
     	
     	final ComponentLog logger = getLogger();
     	EndpointDescription[] endpointDescriptions = null;
-    	EndpointDescription endpointDescription = null;
+    	
     	KeyPair myClientApplicationInstanceCertificate = null;
     	KeyPair myHttpsCertificate = null;
     	
@@ -281,12 +282,6 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 				
 		logger.debug("Using endpoint: " + endpointDescription.toString());
 		
-		try {
-			mySession = myClient.createSessionChannel(endpointDescription);
-			mySession.activate();	
-		} catch (ServiceResultException e1) {
-			logger.error(e1.getMessage());
-		}
     }
     
     @OnUnscheduled
@@ -311,6 +306,13 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 		
 		final ComponentLog logger = getLogger();
 		StringBuilder stringBuilder = new StringBuilder();
+		
+		try {
+			mySession = myClient.createSessionChannel(endpointDescription);
+			mySession.activate();	
+		} catch (ServiceResultException e1) {
+			logger.error(e1.getMessage());
+		}
 		
 		// Set the starting node and parse the node tree
 		if ( context.getProperty(STARTING_NODE).getValue() == null) {
