@@ -15,3 +15,4 @@
 com.kentender.nifi.opcua.GetValue
 com.kentender.nifi.opcua.GetExpandedNodeIds
 com.kentender.nifi.opcua.GetEndpoints
+com.kentender.nifi.opcua.GetSessionInfo

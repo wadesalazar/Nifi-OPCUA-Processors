@@ -24,7 +24,7 @@
 
     <groupId>com.kentender.nifi</groupId>
     <artifactId>opcua</artifactId>
-    <version>0.0.2-SNAPSHOT</version>
+    <version>0.0.3-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <modules>

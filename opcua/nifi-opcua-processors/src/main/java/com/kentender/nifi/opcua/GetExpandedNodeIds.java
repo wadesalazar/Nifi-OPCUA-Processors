@@ -282,23 +282,21 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 				
 		logger.debug("Using endpoint: " + endpointDescription.toString());
 		
+		try {
+			mySession = myClient.createSessionChannel(endpointDescription);
+		} catch (ServiceResultException e) {
+			// TODO Auto-generated catch block
+			logger.debug("Error while creating initial SessionChannel: ");
+			logger.error(e.getMessage());
+		}
+		
     }
     
     @OnUnscheduled
 	public void onUnscheduled(final ProcessContext context){
     	final ComponentLog logger = getLogger();
     	
-    	// Close the session 
-        try {
-			mySession.close();
-		} catch (ServiceFaultException e) {
-			logger.error(e.getMessage());
-		} catch (ServiceResultException e) {
-			logger.error(e.getMessage());
-		}
-        
-        myClient = null;
-    	mySession = null;
+    	
     }
     
 	@Override
@@ -307,12 +305,22 @@ public class GetExpandedNodeIds extends AbstractProcessor {
 		final ComponentLog logger = getLogger();
 		StringBuilder stringBuilder = new StringBuilder();
 		
-		try {
-			mySession = myClient.createSessionChannel(endpointDescription);
-			mySession.activate();	
-		} catch (ServiceResultException e1) {
-			logger.error(e1.getMessage());
-		}
+		// Test session and if closed create and activate new session 
+    	try {
+    		mySession.activate();
+  		} catch (ServiceResultException e1) {
+  			
+  			logger.debug("The session " + mySession.getSession().getAuthenticationToken() + " has timed out.");
+  			try {
+  				logger.debug("Creating new session");
+				mySession = myClient.createSessionChannel(endpointDescription);
+				mySession.activate();
+			} catch (ServiceResultException e) {
+				logger.debug("Error while creating new session: ");
+				logger.error(e.getMessage());
+			}
+  			
+  		}
 		
 		// Set the starting node and parse the node tree
 		if ( context.getProperty(STARTING_NODE).getValue() == null) {

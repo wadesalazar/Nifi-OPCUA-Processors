@@ -288,17 +288,7 @@ public class GetValue extends AbstractProcessor {
 	public void onUnscheduled(final ProcessContext context){
     	final ComponentLog logger = getLogger();
     	
-    	// Close the session 
-        try {
-			mySession.close();
-		} catch (ServiceFaultException e) {
-			logger.error(e.getMessage());
-		} catch (ServiceResultException e) {
-			logger.error(e.getMessage());
-		}
-        
-        myClient = null;
-    	mySession = null;
+    	
     	
 
     }
